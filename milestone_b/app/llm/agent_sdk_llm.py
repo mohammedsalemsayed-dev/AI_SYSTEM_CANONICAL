@@ -40,13 +40,16 @@ class AgentSDKLLM:
         from claude_agent_sdk import (  # lazy
             AssistantMessage,
             ClaudeAgentOptions,
+            ResultError,
             ResultMessage,
             TextBlock,
             query,
         )
 
         opts_kw: dict = {
-            "max_turns": 1,
+            # no tools, so the model can't loop; keep headroom for a
+            # thinking turn + the answer turn.
+            "max_turns": 8,
             "allowed_tools": [],
             "permission_mode": "default",
         }
@@ -58,17 +61,22 @@ class AgentSDKLLM:
         chunks: list[str] = []
         final: str | None = None
         inp = out = 0
-        async for message in query(prompt=full_prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        chunks.append(block.text)
-            elif isinstance(message, ResultMessage):
-                final = getattr(message, "result", None)
-                usage = getattr(message, "usage", None)
-                if usage is not None:
-                    inp = int(getattr(usage, "input_tokens", 0) or 0)
-                    out = int(getattr(usage, "output_tokens", 0) or 0)
+        try:
+            async for message in query(prompt=full_prompt, options=options):
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            chunks.append(block.text)
+                elif isinstance(message, ResultMessage):
+                    final = getattr(message, "result", None)
+                    usage = getattr(message, "usage", None)
+                    if usage is not None:
+                        inp = int(getattr(usage, "input_tokens", 0) or 0)
+                        out = int(getattr(usage, "output_tokens", 0) or 0)
+        except ResultError:
+            # e.g. max-turns hit; fall through and use whatever text we collected
+            if not chunks:
+                raise
 
         text = "".join(chunks) or (final or "")
         if not text:

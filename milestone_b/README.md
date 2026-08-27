@@ -24,7 +24,7 @@ python -m app.cli.demo               # offline end-to-end run, no API key
 | 7 | Orchestrator (full §1 flow) + CLI + offline demo | **done** |
 | 8 | Integration happy path + failure paths | **done** |
 | 9 | Light recovery (`resume`, interrupted-task, reopen) | **done** |
-| 10 | 10 real tasks + `SLICE_FINDINGS.md` | **blocked — needs your credentials** |
+| 10 | premise test + `SLICE_FINDINGS.md` | **done — 10/10 tasks correct on the Pro subscription; see [SLICE_FINDINGS.md](SLICE_FINDINGS.md)** |
 
 ### Milestone C ([../MILESTONE_C_PLAN.md](../MILESTONE_C_PLAN.md)) — security and authority
 

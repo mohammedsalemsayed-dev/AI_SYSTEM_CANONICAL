@@ -32,8 +32,15 @@ Reply with ONLY a JSON object, no prose, with these keys:
   success_criteria:   string[] — observable conditions that mean the task is done
   required_evidence:  string[] — MUST contain one entry of the exact form
                       "T0: pytest <path-or-nodeid> passes" naming a runnable test.
-                      If no concrete runnable test target exists, still give your best guess here
-                      AND put the blocking question in "ambiguity".
+                      The <path-or-nodeid> MUST be relative to the repository root and
+                      appear verbatim in WORKSPACE FILES (e.g. "test_age.py::test_x") —
+                      do NOT prepend any directory that is not in that list.
+                      If exactly one test file in WORKSPACE FILES plainly covers the
+                      described behavior, use it as a whole-file target
+                      (e.g. "T0: pytest test_paginate.py passes") — do NOT raise ambiguity
+                      just because no specific node id was named.
+                      Only if there is genuinely no test file that could cover this: give
+                      your best guess here AND put the blocking question in "ambiguity".
   assumptions:        string[]
   ambiguity:          string[] — questions that materially change the result; empty if none
   constraints:        string[]

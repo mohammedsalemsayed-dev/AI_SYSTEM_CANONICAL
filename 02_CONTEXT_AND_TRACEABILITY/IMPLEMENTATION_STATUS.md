@@ -69,8 +69,11 @@ stubbed):
 - workspace-copy isolation (temp dir; not a hardened sandbox);
 - `resume()` light recovery (interrupted task fails cleanly, workspace untouched).
 
-Day 10 (10 real tasks + `SLICE_FINDINGS.md`) needs Anthropic credentials / Agent SDK auth
-and is not yet run.
+Day 10 (premise test) — **done**. 10 seeded tasks through the real loop (Agent SDK for
+Interpreter/Planner/Builder on a Claude Pro subscription, VerifierT0 in the Docker Tier-A
+sandbox): **10/10 COMPLETED, 10/10 T0 pass, 10/10 diffs correct**, ~22 s/task. Per
+MILESTONE_B_PLAN.md §7 the premise holds. Caveats: bugs are small single-function fixes with
+a named failing test; seeded not real; see `milestone_b/SLICE_FINDINGS.md`.
 
 ## Milestone C — security and authority (`milestone_b/`, days 1–15; sandbox runtime pending)
 

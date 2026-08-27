@@ -32,6 +32,23 @@ def extract_pytest_target(required_evidence: list[str]) -> str | None:
     return None
 
 
+def _resolve_target(target: str, ws: str) -> str:
+    """If the target's file part is not in `ws`, retry with its basename — the
+    Interpreter sometimes prepends the repo directory."""
+    from pathlib import Path
+
+    parts = target.split()
+    fixed = []
+    for tok in parts:
+        path_part, sep, node = tok.partition("::")
+        if path_part and not (Path(ws) / path_part).exists():
+            base = Path(path_part).name
+            if (Path(ws) / base).exists():
+                path_part = base
+        fixed.append(path_part + sep + node)
+    return " ".join(fixed)
+
+
 class VerifierT0:
     tier = "T0"
 
@@ -80,10 +97,11 @@ class VerifierT0:
                     residual_uncertainty="diff did not apply to a clean checkout",
                 )
 
+            resolved = _resolve_target(target, ws)
             result = self._runner.run(
                 SandboxSpec(
                     workdir=ws,
-                    command=["python", "-m", "pytest", *target.split(), "-q"],
+                    command=["python", "-m", "pytest", *resolved.split(), "-q"],
                     network=False,
                     timeout_s=_PYTEST_TIMEOUT_S,
                 )
