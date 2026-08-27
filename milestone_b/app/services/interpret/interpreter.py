@@ -19,6 +19,7 @@ from app.schemas.contracts import (
     TaskContract,
     validate_contract,
 )
+from app.services.budget.tracker import default_budget
 
 _VALID_CLASSES = set(get_args(TaskClass))
 
@@ -78,6 +79,7 @@ class Interpreter:
             risk_level=data.get("risk_level", "low")
             if data.get("risk_level") in {"low", "medium", "high"}
             else "low",
+            budget=default_budget(task_class),
         )
 
         # A contract that fails the INTERPRETING gate but was not flagged by the

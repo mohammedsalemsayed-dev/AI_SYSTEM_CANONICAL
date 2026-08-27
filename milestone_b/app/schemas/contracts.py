@@ -66,6 +66,9 @@ class TaskContract(BaseModel):
     risk_level: Literal["low", "medium", "high"] = "low"
     workspace_id: str = ""
     resource_sensitivity: str = "normal"
+    # DESIGN_TIGHTENING §11.1 — filled by the Interpreter per task_class, user-overridable.
+    # model_cost_usd is 0/unmetered on the subscription (Agent SDK) path.
+    budget: dict[str, float] = Field(default_factory=dict)
 
 
 class ClarificationRequest(BaseModel):

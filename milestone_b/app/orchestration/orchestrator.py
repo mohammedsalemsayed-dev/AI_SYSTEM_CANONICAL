@@ -25,6 +25,7 @@ from app.schemas.contracts import (
     TaskResult,
     new_id,
 )
+from app.services.budget.tracker import BudgetTracker
 from app.services.build.workspace_copy import cleanup, copy_workspace
 from app.services.capability.issue import CapabilityError, issue_grant
 from app.services.capability.registry import primary_operation
@@ -67,6 +68,14 @@ class StalledEscalation(Exception):
         super().__init__(detail)
         self.classification = classification
         self.detail = detail
+
+
+class BudgetExhausted(Exception):
+    """Raised when a budget dimension hits 100% — the task pauses for the user."""
+
+    def __init__(self, summary: str) -> None:
+        super().__init__(summary)
+        self.summary = summary
 
 
 _TERMINAL = {State.COMPLETED, State.FAILED, State.CANCELLED}
@@ -244,6 +253,25 @@ class Orchestrator:
                 f"{stall.classification.lower()} after escalation ladder: {stall.detail}",
                 state=State.WAITING_FOR_USER,
             )
+        except BudgetExhausted as be:
+            self.log.append(
+                task_id,
+                EventKind.BUDGET,
+                {"level": "hard", "summary": be.summary},
+            )
+            self.log.append(
+                task_id,
+                EventKind.CLARIFICATION,
+                ClarificationRequest(
+                    task_id=task_id,
+                    questions=[f"Budget exhausted ({be.summary}). Extend it or stop?"],
+                    why="task budget reached 100%",
+                ),
+            )
+            self._transition(task_id, State.WAITING_FOR_USER)
+            return self._finish(
+                task_id, f"budget exhausted: {be.summary}", state=State.WAITING_FOR_USER
+            )
 
         self._transition(task_id, State.VERIFYING)
         verification = self.verifier.verify(
@@ -337,29 +365,40 @@ class Orchestrator:
         progress = ProgressService(task_id, patience_for(contract.task_class))
         loop = LoopDetector()
         ladder = Ladder()
+        budget = BudgetTracker(contract.budget, contract.task_class)
+        soft_warned = False
         combined_diff = ""
         try:
-            # baseline measurement — tests before any edit
-            base_out = self._run_target(ws, target)
-            progress.observe(
-                measure_step(0, pytest_output=base_out, changed_paths=[], diff_text="")
-            )
-
             steps = list(plan.steps)
+            # per-step T0 measurement only earns its cost on multi-step plans;
+            # a single step can't stall, and the final verify already runs the target
+            measure = len(steps) > 1
+
+            if measure:
+                base_out = self._run_target(ws, target)
+                progress.observe(
+                    measure_step(0, pytest_output=base_out, changed_paths=[], diff_text="")
+                )
+
             i = 0
             executed = 0
             while i < len(steps):
                 if executed >= _MAX_STEPS:
                     raise BuildError(f"execution exceeded {_MAX_STEPS} steps")
+                if budget.would_exceed(extra_steps=1):
+                    raise BudgetExhausted(budget.summary())
                 step = steps[i]
                 executed += 1
+                budget.add_step()
 
                 proposal, out = self._run_step(
                     task_id, contract, step, ws, approved_steps
                 )
-                if out is None:  # REQUIRE_APPROVAL pause was raised inside _run_step
-                    return combined_diff  # unreachable; _run_step raises
                 combined_diff = out.diff or combined_diff
+
+                if not measure:
+                    i += 1
+                    continue
 
                 step_out = self._run_target(ws, target)
                 m = measure_step(
@@ -384,6 +423,17 @@ class Orchestrator:
                     | {"loop_flags": lr.flags, "effective_class": effective},
                 )
 
+                if budget.over_hard():
+                    raise BudgetExhausted(budget.summary())
+                if budget.over_soft() and not soft_warned:
+                    soft_warned = True
+                    self.log.append(
+                        task_id,
+                        EventKind.BUDGET,
+                        {"level": "soft", "peak_fraction": round(budget.peak_fraction(), 2),
+                         "summary": budget.summary()},
+                    )
+
                 if effective in ("STALLED", "LOOP_RISK"):
                     outcome, new_steps = self._run_ladder(
                         task_id, contract, workspace_path, ladder,
@@ -391,6 +441,7 @@ class Orchestrator:
                     )
                     if outcome == "replanned":
                         steps, i = new_steps, 0
+                        measure = True  # a re-plan means we keep watching
                         progress = ProgressService(
                             task_id, patience_for(contract.task_class)
                         )
