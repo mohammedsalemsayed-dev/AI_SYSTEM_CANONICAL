@@ -18,7 +18,7 @@ from app.orchestration.orchestrator import Orchestrator
 from app.services.build import get_builder
 from app.services.interpret.interpreter import Interpreter
 from app.services.plan.planner import Planner
-from app.services.policy.stub import AllowAllPolicy
+from app.services.policy.engine import PolicyEngine
 from app.services.verify.verifier_t0 import VerifierT0
 from app.services.workspace.listing import is_git_repo
 from app.llm import get_llm
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
             Planner(llm),
             get_builder(args.builder),
             VerifierT0(),
-            AllowAllPolicy(),
+            PolicyEngine(),
         )
         result = orch.run(args.request, workspace)
         print_timeline(log, result.task_id)

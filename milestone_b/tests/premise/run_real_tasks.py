@@ -25,7 +25,7 @@ from app.orchestration.orchestrator import Orchestrator
 from app.services.build.agent_sdk import AgentSDKBuilder
 from app.services.interpret.interpreter import Interpreter
 from app.services.plan.planner import Planner
-from app.services.policy.stub import AllowAllPolicy
+from app.services.policy.engine import PolicyEngine
 from app.services.verify.verifier_t0 import VerifierT0
 from app.services.workspace.listing import is_git_repo
 from app.llm.anthropic_client import AnthropicLLM
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         Planner(llm),
         AgentSDKBuilder(),
         VerifierT0(),
-        AllowAllPolicy(),
+        PolicyEngine(),
     )
 
     rows: list[dict] = []

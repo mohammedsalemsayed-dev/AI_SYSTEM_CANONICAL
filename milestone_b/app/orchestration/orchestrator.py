@@ -22,6 +22,8 @@ from app.schemas.contracts import (
     new_id,
 )
 from app.services.build.workspace_copy import cleanup, copy_workspace
+from app.services.capability.issue import CapabilityError, issue_grant
+from app.services.capability.registry import primary_operation
 from app.services.workspace.listing import list_workspace
 
 
@@ -167,11 +169,19 @@ class Orchestrator:
         combined_diff = ""
         try:
             for step in plan.steps:
+                # Capabilities are frozen from the trusted Plan, before execution
+                # and before any untrusted content is fetched (DESIGN_TIGHTENING 14.3).
+                try:
+                    grant = issue_grant(task_id, step, workspace_root=ws, network_allowlist=[])
+                except CapabilityError as exc:
+                    raise BuildError(str(exc)) from exc
+                self.log.append(task_id, EventKind.CAPABILITY_GRANT, grant)
+
                 proposal = ActionProposal(
                     task_id=task_id,
                     step_id=step.id,
-                    operation="builder.execute",
-                    arguments={"intent": step.intent},
+                    operation=primary_operation(step.required_capability),
+                    arguments={"path": ws, "intent": step.intent},
                     required_capability=step.required_capability,
                     workspace_scope=ws,
                     expected_effect=step.expected_artifact_delta,
@@ -179,11 +189,25 @@ class Orchestrator:
                 )
                 self.log.append(task_id, EventKind.ACTION_PROPOSAL, proposal)
 
-                decision = self.policy.decide(proposal, contract)
+                decision = self.policy.decide(proposal, contract, grant)
                 self.log.append(task_id, EventKind.POLICY_DECISION, decision)
+                if decision.decision == "REQUIRE_APPROVAL":
+                    # Full approval flow is Milestone C day 10; until then, fail closed.
+                    self.log.append(
+                        task_id,
+                        EventKind.APPROVAL_REQUEST,
+                        {"action_id": proposal.action_id, "reason": decision.reason},
+                    )
+                    raise BuildError(f"approval required (not yet wired): {decision.reason}")
                 if decision.decision != "ALLOW":
+                    if decision.rule in ("tainted-side-effect",):
+                        self.log.append(
+                            task_id,
+                            EventKind.TAINT_BLOCKED,
+                            {"action_id": proposal.action_id, "reason": decision.reason},
+                        )
                     raise BuildError(
-                        f"policy returned {decision.decision}: {decision.reason}"
+                        f"policy {decision.decision} [{decision.rule}]: {decision.reason}"
                     )
 
                 out = self.builder.execute(

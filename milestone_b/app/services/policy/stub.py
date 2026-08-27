@@ -8,17 +8,29 @@ site does not change.
 
 from __future__ import annotations
 
-from app.schemas.contracts import ActionProposal, PolicyDecision, TaskContract
+from app.schemas.contracts import (
+    ActionProposal,
+    CapabilityGrant,
+    PolicyDecision,
+    TaskContract,
+)
 
 
 class AllowAllPolicy:
+    """Milestone B stub, kept as an opt-in test double. Milestone C's real engine
+    is `app.services.policy.engine.PolicyEngine`."""
+
     name = "stub-allow-all"
 
     def decide(
-        self, proposal: ActionProposal, contract: TaskContract
+        self,
+        proposal: ActionProposal,
+        contract: TaskContract,
+        grant: CapabilityGrant | None = None,
     ) -> PolicyDecision:
         return PolicyDecision(
             action_id=proposal.action_id,
             decision="ALLOW",
-            reason="slice stub: allow + log (no capability enforcement yet)",
+            reason="stub: allow + log (no enforcement)",
+            rule="stub-allow-all",
         )

@@ -96,6 +96,11 @@ class Plan(BaseModel):
 # --------------------------------------------------------------------------- #
 # preflight / execute
 # --------------------------------------------------------------------------- #
+TrustLevel = Literal["user", "workspace", "tool_output", "retrieved_web", "doc_input"]
+"""DESIGN_TIGHTENING.md section 12 / 14.3. `user` and `workspace` authorise; the
+rest inform only. `is_tainted` == not authorising."""
+
+
 class ActionProposal(BaseModel):
     action_id: str = Field(default_factory=lambda: new_id("act"))
     task_id: str
@@ -106,20 +111,78 @@ class ActionProposal(BaseModel):
     workspace_scope: str
     expected_effect: str
     idempotency_key: str
+    # structural taint: the trust of the inputs that produced this proposal
+    trust: TrustLevel = "user"
+    taint_sources: list[str] = Field(default_factory=list)
+
+    @property
+    def is_tainted(self) -> bool:
+        return self.trust not in ("user", "workspace")
 
 
 class PolicyDecision(BaseModel):
     action_id: str
     decision: Literal["ALLOW", "DENY", "REQUIRE_APPROVAL", "REQUIRE_VERIFICATION", "ESCALATE"]
     reason: str = ""
+    rule: str = ""  # which policy rule produced this decision
 
 
 class CapabilityGrant(BaseModel):
     id: str = Field(default_factory=lambda: new_id("cap"))
     task_id: str
-    scope_path: str
+    step_id: str = ""
+    token: str = ""  # the capability token this grant realises
+    scope_path: str  # filesystem root the grant is confined to
     operations: list[str] = Field(default_factory=list)
+    network_allowlist: list[str] = Field(default_factory=list)
+    issued_at: float = Field(default_factory=now_ts)
     ttl_s: float = 3600.0
+
+    def is_expired(self, now: float | None = None) -> bool:
+        ref = now if now is not None else now_ts()
+        return ref - self.issued_at > self.ttl_s
+
+    def allows_operation(self, operation: str) -> bool:
+        return operation in self.operations
+
+    def covers_path(self, target: str) -> bool:
+        import os
+        from pathlib import Path
+
+        try:
+            root = Path(self.scope_path).resolve()
+            candidate = Path(target)
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            resolved = Path(os.path.normpath(candidate)).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return resolved == root or root in resolved.parents
+
+    def allows_host(self, host: str) -> bool:
+        h = host.strip().lower()
+        return any(
+            h == allowed.lower() or h.endswith("." + allowed.lower())
+            for allowed in self.network_allowlist
+        )
+
+
+class ApprovalRequest(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("apr"))
+    task_id: str
+    action_id: str
+    operation: str
+    reason: str
+    summary: str = ""
+
+
+class ApprovalDecision(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("apd"))
+    task_id: str
+    action_id: str
+    approved: bool
+    by: str = "user"
+    note: str = ""
 
 
 class ArtifactVersion(BaseModel):

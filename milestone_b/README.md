@@ -26,7 +26,18 @@ python -m app.cli.demo               # offline end-to-end run, no API key
 | 9 | Light recovery (`resume`, interrupted-task, reopen) | **done** |
 | 10 | 10 real tasks + `SLICE_FINDINGS.md` | **blocked — needs your credentials** |
 
-47 tests green (`python -m pytest`): 35 unit, 12 integration.
+### Milestone C ([../MILESTONE_C_PLAN.md](../MILESTONE_C_PLAN.md)) — security and authority
+
+| Plan day | Deliverable | State |
+|---|---|---|
+| 1–2 | Capability registry + issuance + grant scope math; Orchestrator issues + logs `CAPABILITY_GRANT` | **done** |
+| 3–4 | Policy Engine (7 ordered rules) replaces `AllowAllPolicy`; wired into the Orchestrator | **done** |
+| 5 | Structural taint boundary + side-effecting check (feeds the `tainted-side-effect` rule) | **done** |
+| 6 | Egress broker (per-task allowlist, default deny, tagged results) | **done** |
+| 7–9 | Tier-A sandbox | **blocked — needs a backend: no Docker / Podman / WSL distro on this machine** |
+| 10–15 | Approvals, secret isolation, audit polish, Security gate | not started (Security gate needs the sandbox) |
+
+85 tests green (`python -m pytest`): 70 unit, 15 integration.
 
 ## Day 10 handoff
 
@@ -94,8 +105,12 @@ tests/
 | Seam | File | Filled in |
 |---|---|---|
 | Model router / local tier | hardcoded provider; `get_llm` | Milestone G / §7 |
-| Sandbox tiers | `workspace_copy` temp dir | §14.6, Milestone C |
-| Policy + capability engine | `services/policy/stub.py` | Milestone C / §14.3 |
+| Sandbox tiers | `workspace_copy` temp dir | §14.6, Milestone C day 7–9 (blocked on backend) |
+| Policy engine | `services/policy/engine.py` — **real** (7 ordered rules) | hardening in later milestones |
+| Capability issuance | `services/capability/` — **real** (registry + scoped grants) | granular per-op proposals in Milestone E |
+| Structural taint | `services/taint/` — **real** (boundary + side-effecting check) | first real exercise in Milestone E |
+| Egress broker | `services/egress/broker.py` — **real** (allowlist, default deny) | wired to a research step in Milestone E |
+| Approvals | `REQUIRE_APPROVAL` fails closed | Milestone C day 10 |
 | Progress / loop detection | none | Milestone D / §14.4 |
 | Recovery / reconciliation | `resume()` fails cleanly | Milestone D |
 | Experience repository | none | Milestone F / §14.7 |

@@ -20,7 +20,7 @@ from app.orchestration.orchestrator import Orchestrator
 from app.services.build.fake import ScriptedBuilder
 from app.services.interpret.interpreter import Interpreter
 from app.services.plan.planner import Planner
-from app.services.policy.stub import AllowAllPolicy
+from app.services.policy.engine import PolicyEngine
 from app.services.verify.verifier_t0 import VerifierT0
 
 _BUGGY = "def add(a, b):\n    return a - b\n"
@@ -75,7 +75,7 @@ def main() -> int:
         Planner(llm),
         ScriptedBuilder({"calc.py": _FIXED}),
         VerifierT0(),
-        AllowAllPolicy(),
+        PolicyEngine(),
     )
     result = orch.run("the add function is wrong, fix it", repo)
     print_timeline(log, result.task_id)

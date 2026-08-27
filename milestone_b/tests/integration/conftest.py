@@ -10,7 +10,7 @@ from app.orchestration.orchestrator import Orchestrator
 from app.services.build.fake import ScriptedBuilder
 from app.services.interpret.interpreter import Interpreter
 from app.services.plan.planner import Planner
-from app.services.policy.stub import AllowAllPolicy
+from app.services.policy.engine import PolicyEngine
 from app.services.verify.verifier_t0 import VerifierT0
 
 
@@ -58,6 +58,7 @@ def build_orchestrator(
     log: EventLog,
     llm_replies: list[str],
     builder_edits,
+    policy=None,
 ) -> Orchestrator:
     llm = ScriptedLLM(llm_replies)
     return Orchestrator(
@@ -66,5 +67,5 @@ def build_orchestrator(
         Planner(llm),
         ScriptedBuilder(builder_edits),
         VerifierT0(),
-        AllowAllPolicy(),
+        policy or PolicyEngine(),
     )
