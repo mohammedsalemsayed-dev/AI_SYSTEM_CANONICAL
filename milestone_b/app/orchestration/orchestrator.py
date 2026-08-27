@@ -15,9 +15,13 @@ from app.events.log import EventKind, EventLog
 from app.events.projections import TaskSnapshot, project_task
 from app.schemas.contracts import (
     ActionProposal,
+    ApprovalDecision,
+    ApprovalRequest,
     ArtifactVersion,
     ClarificationRequest,
     Observation,
+    Plan,
+    TaskContract,
     TaskResult,
     new_id,
 )
@@ -33,6 +37,16 @@ class TransitionError(RuntimeError):
 
 class BuildError(RuntimeError):
     pass
+
+
+class ApprovalPause(Exception):
+    """Raised inside execution when a step needs human approval."""
+
+    def __init__(self, action_id: str, step_id: str, reason: str) -> None:
+        super().__init__(reason)
+        self.action_id = action_id
+        self.step_id = step_id
+        self.reason = reason
 
 
 _TERMINAL = {State.COMPLETED, State.FAILED, State.CANCELLED}
@@ -68,17 +82,32 @@ class Orchestrator:
         )
         return self._drive(task_id, request_text, workspace_path)
 
-    def resume(self, task_id: str) -> TaskResult:
-        """Light recovery (DESIGN_TIGHTENING.md section 1 checkpoint note; full
-        reconciliation is Milestone D). An interrupted non-terminal task is not
-        auto-continued in the slice — it is failed with the pre-interruption state
-        left visible in the log. The user's workspace was never mutated (all work
-        happens in temp copies), so the task is safe to re-run from scratch."""
+    def resume(self, task_id: str, approval: str | None = None) -> TaskResult:
+        """Continue a paused/interrupted task.
+
+        - terminal -> return the recorded result
+        - WAITING_FOR_USER with a pending approval + `approval` in {"approve","deny"}
+          -> record the decision and either resume execution or fail
+        - WAITING_FOR_USER (ambiguity) or `approval` is None -> unchanged
+        - any other non-terminal state -> fail cleanly (interrupted); the user's
+          workspace was never mutated (all work happens in temp copies)
+        """
         snap = self._snap(task_id)
         if snap.state in _TERMINAL:
             return self._result_from_log(task_id)
+
+        if snap.state is State.WAITING_FOR_USER and snap.pending_approval:
+            if approval not in ("approve", "deny"):
+                return self._finish(
+                    task_id, "waiting for approval", state=State.WAITING_FOR_USER
+                )
+            return self._apply_approval(task_id, approval)
+
         if snap.state is State.WAITING_FOR_USER:
-            return self._finish(task_id, "waiting for user input", state=snap.state)
+            return self._finish(
+                task_id, "waiting for user input", state=State.WAITING_FOR_USER
+            )
+
         self.log.append(
             task_id,
             EventKind.ERROR,
@@ -86,9 +115,7 @@ class Orchestrator:
         )
         self._force_fail(task_id)
         return self._finish(
-            task_id,
-            f"interrupted in {snap.state}; re-run the request",
-            state=State.FAILED,
+            task_id, f"interrupted in {snap.state}; re-run the request", state=State.FAILED
         )
 
     # ------------------------------------------------------------------ #
@@ -130,33 +157,8 @@ class Orchestrator:
             self.log.append(task_id, EventKind.MODEL_RUN, prun)
 
             self._transition(task_id, State.EXECUTING)
-            combined_diff = self._execute(task_id, contract, plan, workspace_path)
-
-            self._transition(task_id, State.VERIFYING)
-            verification = self.verifier.verify(
-                task_id=task_id,
-                contract=contract,
-                diff=combined_diff,
-                original_workspace=workspace_path,
-            )
-            self.log.append(task_id, EventKind.VERIFICATION, verification)
-
-            if verification.overall == "pass":
-                self._transition(task_id, State.COMPLETED)
-                return self._finish(
-                    task_id,
-                    "completed",
-                    state=State.COMPLETED,
-                    verified=True,
-                    verification_ref=verification.id,
-                )
-            self._transition(task_id, State.FAILED)
-            return self._finish(
-                task_id,
-                "verification failed: "
-                + (verification.residual_uncertainty[:200] or "test target did not pass"),
-                state=State.FAILED,
-                verification_ref=verification.id,
+            return self._execute_verify_settle(
+                task_id, contract, plan, workspace_path, approved_steps=set()
             )
 
         except Exception as exc:  # noqa: BLE001 - slice: any failure -> FAILED + logged
@@ -164,7 +166,126 @@ class Orchestrator:
             self._force_fail(task_id)
             return self._finish(task_id, f"error: {exc!r}", state=State.FAILED)
 
-    def _execute(self, task_id, contract, plan, workspace_path) -> str:
+    def _execute_verify_settle(
+        self,
+        task_id: str,
+        contract: TaskContract,
+        plan: Plan,
+        workspace_path: str,
+        *,
+        approved_steps: set[str],
+    ) -> TaskResult:
+        try:
+            combined_diff = self._execute(
+                task_id, contract, plan, workspace_path, approved_steps
+            )
+        except ApprovalPause as pause:
+            self.log.append(
+                task_id,
+                EventKind.APPROVAL_REQUEST,
+                ApprovalRequest(
+                    task_id=task_id,
+                    action_id=pause.action_id,
+                    operation="builder.execute",
+                    reason=pause.reason,
+                    summary=f"step {pause.step_id} needs approval",
+                ).model_dump(mode="json")
+                | {"step_id": pause.step_id},
+            )
+            self._transition(task_id, State.WAITING_FOR_USER)
+            return self._finish(
+                task_id,
+                f"waiting for approval: {pause.reason}",
+                state=State.WAITING_FOR_USER,
+            )
+
+        self._transition(task_id, State.VERIFYING)
+        verification = self.verifier.verify(
+            task_id=task_id,
+            contract=contract,
+            diff=combined_diff,
+            original_workspace=workspace_path,
+        )
+        self.log.append(task_id, EventKind.VERIFICATION, verification)
+
+        if verification.overall == "pass":
+            self._transition(task_id, State.COMPLETED)
+            return self._finish(
+                task_id, "completed", state=State.COMPLETED,
+                verified=True, verification_ref=verification.id,
+            )
+        self._transition(task_id, State.FAILED)
+        return self._finish(
+            task_id,
+            "verification failed: "
+            + (verification.residual_uncertainty[:200] or "test target did not pass"),
+            state=State.FAILED,
+            verification_ref=verification.id,
+        )
+
+    def _apply_approval(self, task_id: str, approval: str) -> TaskResult:
+        snap = self._snap(task_id)
+        action_id = snap.pending_approval or ""
+        step_id = self._step_id_for_action(task_id, action_id)
+        approved = approval == "approve"
+        self.log.append(
+            task_id,
+            EventKind.APPROVAL_DECISION,
+            ApprovalDecision(
+                task_id=task_id, action_id=action_id, approved=approved
+            ).model_dump(mode="json")
+            | {"step_id": step_id},
+        )
+        if not approved:
+            self.log.append(
+                task_id, EventKind.ERROR, {"error": "approval denied by user"}
+            )
+            self._transition(task_id, State.FAILED)
+            return self._finish(task_id, "approval denied", state=State.FAILED)
+
+        # resume execution from the start; the builder works on a fresh copy each
+        # time, and the now-approved step is allowed through.
+        try:
+            self._transition(task_id, State.EXECUTING)
+            request = next(
+                e.payload for e in self.log.read(task_id) if e.kind == EventKind.REQUEST
+            )
+            plan = next(
+                Plan.model_validate(e.payload)
+                for e in reversed(self.log.read(task_id))
+                if e.kind == EventKind.PLAN
+            )
+            contract = next(
+                TaskContract.model_validate(e.payload)
+                for e in reversed(self.log.read(task_id))
+                if e.kind == EventKind.CONTRACT
+            )
+        except StopIteration as exc:
+            self.log.append(task_id, EventKind.ERROR, {"error": f"resume: {exc!r}"})
+            self._force_fail(task_id)
+            return self._finish(task_id, "resume failed", state=State.FAILED)
+
+        try:
+            return self._execute_verify_settle(
+                task_id,
+                contract,
+                plan,
+                request["workspace_path"],
+                approved_steps=self._snap(task_id).approved_steps,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log.append(task_id, EventKind.ERROR, {"error": repr(exc)})
+            self._force_fail(task_id)
+            return self._finish(task_id, f"error: {exc!r}", state=State.FAILED)
+
+    def _execute(
+        self,
+        task_id: str,
+        contract: TaskContract,
+        plan: Plan,
+        workspace_path: str,
+        approved_steps: set[str],
+    ) -> str:
         ws = copy_workspace(workspace_path)
         combined_diff = ""
         try:
@@ -172,7 +293,9 @@ class Orchestrator:
                 # Capabilities are frozen from the trusted Plan, before execution
                 # and before any untrusted content is fetched (DESIGN_TIGHTENING 14.3).
                 try:
-                    grant = issue_grant(task_id, step, workspace_root=ws, network_allowlist=[])
+                    grant = issue_grant(
+                        task_id, step, workspace_root=ws, network_allowlist=[]
+                    )
                 except CapabilityError as exc:
                     raise BuildError(str(exc)) from exc
                 self.log.append(task_id, EventKind.CAPABILITY_GRANT, grant)
@@ -191,16 +314,15 @@ class Orchestrator:
 
                 decision = self.policy.decide(proposal, contract, grant)
                 self.log.append(task_id, EventKind.POLICY_DECISION, decision)
+
                 if decision.decision == "REQUIRE_APPROVAL":
-                    # Full approval flow is Milestone C day 10; until then, fail closed.
-                    self.log.append(
-                        task_id,
-                        EventKind.APPROVAL_REQUEST,
-                        {"action_id": proposal.action_id, "reason": decision.reason},
-                    )
-                    raise BuildError(f"approval required (not yet wired): {decision.reason}")
-                if decision.decision != "ALLOW":
-                    if decision.rule in ("tainted-side-effect",):
+                    if step.id not in approved_steps:
+                        raise ApprovalPause(
+                            proposal.action_id, step.id, decision.reason
+                        )
+                    # already approved -> fall through and execute
+                elif decision.decision != "ALLOW":
+                    if decision.rule == "tainted-side-effect":
                         self.log.append(
                             task_id,
                             EventKind.TAINT_BLOCKED,
@@ -244,6 +366,12 @@ class Orchestrator:
     def _snap(self, task_id: str) -> TaskSnapshot:
         return project_task(self.log.read(task_id))
 
+    def _step_id_for_action(self, task_id: str, action_id: str) -> str:
+        for e in self.log.read(task_id):
+            if e.kind == EventKind.ACTION_PROPOSAL and e.payload.get("action_id") == action_id:
+                return e.payload.get("step_id", "")
+        return ""
+
     def _transition(self, task_id: str, target: State) -> None:
         snap = self._snap(task_id)
         ok, reason = transition_ok(snap.state, target, snap)
@@ -253,15 +381,13 @@ class Orchestrator:
 
     def _force_fail(self, task_id: str) -> None:
         snap = self._snap(task_id)
-        if snap.state in _TERMINAL or snap.state is State.WAITING_FOR_USER:
+        if snap.state in _TERMINAL:
             return
         if State.FAILED in _allowed_from(snap.state):
             self.log.append(task_id, EventKind.STATE, {"state": State.FAILED})
 
     def _finish(self, task_id: str, summary: str, *, state: State, **kw) -> TaskResult:
-        result = TaskResult(
-            task_id=task_id, state=state.value, summary=summary, **kw
-        )
+        result = TaskResult(task_id=task_id, state=state.value, summary=summary, **kw)
         self.log.append(task_id, EventKind.RESULT, result)
         return result
 

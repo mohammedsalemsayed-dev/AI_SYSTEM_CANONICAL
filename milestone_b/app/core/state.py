@@ -34,8 +34,14 @@ ALLOWED: dict[State, set[State]] = {
     State.CREATED: {State.INTERPRETING, State.CANCELLED},
     State.INTERPRETING: {State.PLANNING, State.WAITING_FOR_USER, State.FAILED, State.CANCELLED},
     State.PLANNING: {State.EXECUTING, State.WAITING_FOR_USER, State.FAILED, State.CANCELLED},
-    State.WAITING_FOR_USER: {State.INTERPRETING, State.CANCELLED},
-    State.EXECUTING: {State.VERIFYING, State.STALLED, State.FAILED, State.CANCELLED},
+    State.WAITING_FOR_USER: {State.INTERPRETING, State.EXECUTING, State.FAILED, State.CANCELLED},
+    State.EXECUTING: {
+        State.VERIFYING,
+        State.WAITING_FOR_USER,
+        State.STALLED,
+        State.FAILED,
+        State.CANCELLED,
+    },
     State.VERIFYING: {State.COMPLETED, State.STALLED, State.FAILED, State.CANCELLED},
     State.STALLED: {State.RECOVERING, State.WAITING_FOR_USER, State.FAILED, State.CANCELLED},
     State.RECOVERING: {
@@ -84,8 +90,11 @@ def gate_reason(target: State, snap: _Snapshot) -> tuple[bool, str]:
 
     if target is State.WAITING_FOR_USER:
         has_reason = bool(
-            snap.contract is not None
-            and (snap.contract.ambiguity or snap.contract_problems)
+            getattr(snap, "pending_approval", None)
+            or (
+                snap.contract is not None
+                and (snap.contract.ambiguity or snap.contract_problems)
+            )
         )
         return has_reason, "" if has_reason else "nothing to ask the user"
 

@@ -23,7 +23,10 @@ from app.services.verify.verifier_t0 import VerifierT0
 from app.services.workspace.listing import is_git_repo
 from app.llm import get_llm
 
-_SUMMARY_KEYS = ("state", "text", "objective", "overall", "decision", "error", "verified")
+_SUMMARY_KEYS = (
+    "state", "text", "objective", "overall", "decision", "rule", "token",
+    "approved", "reason", "error", "verified",
+)
 
 
 def _summarize(payload: dict) -> str:

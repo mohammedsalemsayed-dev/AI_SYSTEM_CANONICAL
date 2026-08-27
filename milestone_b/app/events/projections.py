@@ -33,6 +33,11 @@ class TaskSnapshot:
     verification: VerificationRecord | None = None
     result: dict[str, Any] | None = None
     last_error: str | None = None
+    pending_approval: str | None = None  # action_id awaiting an approval decision
+    approved_steps: set[str] = field(default_factory=set)
+    capability_grants: list[dict[str, Any]] = field(default_factory=list)
+    policy_decisions: list[dict[str, Any]] = field(default_factory=list)
+    taint_blocks: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def contract_problems(self) -> list[str]:
@@ -67,6 +72,18 @@ def project_task(events: list[Event]) -> TaskSnapshot:
             snap.result = payload
         elif kind == EventKind.ERROR:
             snap.last_error = payload.get("error")
+        elif kind == EventKind.APPROVAL_REQUEST:
+            snap.pending_approval = payload.get("action_id")
+        elif kind == EventKind.APPROVAL_DECISION:
+            snap.pending_approval = None
+            if payload.get("approved") and payload.get("step_id"):
+                snap.approved_steps.add(payload["step_id"])
+        elif kind == EventKind.CAPABILITY_GRANT:
+            snap.capability_grants.append(payload)
+        elif kind == EventKind.POLICY_DECISION:
+            snap.policy_decisions.append(payload)
+        elif kind == EventKind.TAINT_BLOCKED:
+            snap.taint_blocks.append(payload)
         # ACTION_PROPOSAL, POLICY_DECISION, ARTIFACT, MODEL_RUN, CLARIFICATION:
         # recorded in the log for audit; not needed in the snapshot for the slice.
 

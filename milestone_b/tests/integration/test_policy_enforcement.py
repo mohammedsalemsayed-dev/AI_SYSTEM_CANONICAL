@@ -48,20 +48,63 @@ def test_unknown_capability_token_fails_task(sample_repo: str) -> None:
     log.close()
 
 
-def test_require_approval_blocks_until_day_10(sample_repo: str) -> None:
-    log = EventLog()
-    orch = build_orchestrator(
+def _approval_orch(log: EventLog):
+    return build_orchestrator(
         log,
         llm_replies=[interpreter_reply(), planner_reply()],
         builder_edits={"calc.py": FIXED_CALC},
         policy=PolicyEngine(risk_globs=["*"]),  # force REQUIRE_APPROVAL on any write
     )
-    result = orch.run("fix add", sample_repo)
 
-    assert result.state == "FAILED"
+
+def test_require_approval_pauses_at_waiting_for_user(sample_repo: str) -> None:
+    log = EventLog()
+    result = _approval_orch(log).run("fix add", sample_repo)
+
+    assert result.state == "WAITING_FOR_USER"
     kinds = [e.kind for e in log.read(result.task_id)]
     assert EventKind.APPROVAL_REQUEST in kinds
-    assert EventKind.ARTIFACT not in kinds
+    assert EventKind.ARTIFACT not in kinds  # builder has not run
     snap = project_task(log.read(result.task_id))
-    assert "approval required" in (snap.last_error or "")
+    assert snap.pending_approval is not None
+    log.close()
+
+
+def test_resume_approve_completes_the_task(sample_repo: str) -> None:
+    log = EventLog()
+    orch = _approval_orch(log)
+    paused = orch.run("fix add", sample_repo)
+    assert paused.state == "WAITING_FOR_USER"
+
+    done = orch.resume(paused.task_id, approval="approve")
+    assert done.state == "COMPLETED"
+    assert done.verified is True
+    kinds = [e.kind for e in log.read(paused.task_id)]
+    assert EventKind.APPROVAL_DECISION in kinds
+    assert EventKind.ARTIFACT in kinds  # builder ran after approval
+    log.close()
+
+
+def test_resume_deny_fails_the_task(sample_repo: str) -> None:
+    log = EventLog()
+    orch = _approval_orch(log)
+    paused = orch.run("fix add", sample_repo)
+
+    denied = orch.resume(paused.task_id, approval="deny")
+    assert denied.state == "FAILED"
+    snap = project_task(log.read(paused.task_id))
+    assert snap.pending_approval is None
+    errors = [e.payload["error"] for e in log.read(paused.task_id) if e.kind == EventKind.ERROR]
+    assert any("denied" in m for m in errors)
+    kinds = [e.kind for e in log.read(paused.task_id)]
+    assert EventKind.ARTIFACT not in kinds  # builder never ran
+    log.close()
+
+
+def test_resume_without_decision_stays_waiting(sample_repo: str) -> None:
+    log = EventLog()
+    orch = _approval_orch(log)
+    paused = orch.run("fix add", sample_repo)
+    still = orch.resume(paused.task_id)  # no approval arg
+    assert still.state == "WAITING_FOR_USER"
     log.close()

@@ -71,3 +71,23 @@ stubbed):
 
 Day 10 (10 real tasks + `SLICE_FINDINGS.md`) needs Anthropic credentials / Agent SDK auth
 and is not yet run.
+
+## Milestone C — security and authority (`milestone_b/`, days 1–15; sandbox runtime pending)
+
+132 tests green + 1 skipped. See `milestone_b/MILESTONE_C_NOTES.md`.
+
+Now real (slice scope):
+- capability registry + per-step scoped `CapabilityGrant` issuance (frozen from the Plan);
+- deterministic Policy Engine (7 ordered rules) replacing the allow-all stub;
+- structural taint (single tagging site + single side-effecting check);
+- egress broker (per-task allowlist, default deny, tagged results);
+- approval flow — `REQUIRE_APPROVAL` -> `WAITING_FOR_USER` -> `resume(approval=...)`;
+- secret isolation — `SecretStore` + `scrub_env`, both sandbox backends scrub;
+- audit event kinds + projection fields;
+- Security gate — 26-case injection/abuse corpus + path-traversal battery + end-to-end
+  objective-preservation.
+
+Pending: the Tier-A sandbox is coded (`DockerSandbox`, arg-verified) but has not run a real
+container — needs Docker Desktop installed, `slice-sandbox:pytest` built, and the
+`--selftest` passing. Until then a dev-only non-isolating subprocess fallback is used and
+refuses runs marked `allow_non_isolated=False`.

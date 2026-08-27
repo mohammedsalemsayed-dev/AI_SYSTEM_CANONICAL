@@ -1,14 +1,12 @@
 """Verifier — T0 tier only (DESIGN_TIGHTENING.md section 5).
 
 Deterministic, no model. Takes a fresh copy of the *original* workspace, applies
-the Builder's diff, and runs the pytest target named in the contract's
-`required_evidence`. Independence: separate checkout, separate process.
+the Builder's diff on the host, then runs the pytest target named in the
+contract's `required_evidence` **inside the sandbox** (MILESTONE_C_PLAN.md 7-9).
+Independence: separate checkout, separate execution environment.
 """
 
 from __future__ import annotations
-
-import subprocess
-import sys
 
 from app.schemas.contracts import (
     CriterionVerdict,
@@ -16,6 +14,8 @@ from app.schemas.contracts import (
     VerificationRecord,
 )
 from app.services.build.workspace_copy import apply_diff, cleanup, copy_workspace
+from app.services.sandbox import SandboxSpec, select_runner
+from app.services.sandbox.runner import SandboxRunner
 
 _PYTEST_TIMEOUT_S = 300
 
@@ -35,6 +35,16 @@ def extract_pytest_target(required_evidence: list[str]) -> str | None:
 class VerifierT0:
     tier = "T0"
 
+    def __init__(
+        self, runner: SandboxRunner | None = None, *, require_isolation: bool = False
+    ) -> None:
+        # require_isolation=True for real / tainted runs; the fallback is refused.
+        self._runner = runner or select_runner(require_isolation=require_isolation)
+
+    @property
+    def backend(self) -> str:
+        return self._runner.name
+
     def verify(
         self,
         *,
@@ -50,20 +60,14 @@ class VerifierT0:
 
         if not target:
             return VerificationRecord(
-                task_id=task_id,
-                tier="T0",
-                criteria=[criterion],
-                overall="fail",
+                task_id=task_id, tier="T0", criteria=[criterion], overall="fail",
                 residual_uncertainty="no runnable pytest target in required_evidence",
             )
 
         if not diff.strip():
             criterion.verdict = "fail"
             return VerificationRecord(
-                task_id=task_id,
-                tier="T0",
-                criteria=[criterion],
-                overall="fail",
+                task_id=task_id, tier="T0", criteria=[criterion], overall="fail",
                 residual_uncertainty="builder produced no change",
             )
 
@@ -72,40 +76,41 @@ class VerifierT0:
             if not apply_diff(ws, diff):
                 criterion.verdict = "fail"
                 return VerificationRecord(
-                    task_id=task_id,
-                    tier="T0",
-                    criteria=[criterion],
-                    overall="fail",
+                    task_id=task_id, tier="T0", criteria=[criterion], overall="fail",
                     residual_uncertainty="diff did not apply to a clean checkout",
                 )
 
-            proc = subprocess.run(
-                [sys.executable, "-m", "pytest", *target.split(), "-q"],
-                cwd=ws,
-                capture_output=True,
-                text=True,
-                timeout=_PYTEST_TIMEOUT_S,
+            result = self._runner.run(
+                SandboxSpec(
+                    workdir=ws,
+                    command=["python", "-m", "pytest", *target.split(), "-q"],
+                    network=False,
+                    timeout_s=_PYTEST_TIMEOUT_S,
+                )
             )
-            passed = proc.returncode == 0
+            if result.timed_out:
+                criterion.verdict = "fail"
+                return VerificationRecord(
+                    task_id=task_id, tier="T0", criteria=[criterion], overall="fail",
+                    residual_uncertainty=f"pytest timed out after {_PYTEST_TIMEOUT_S}s "
+                    f"[{result.backend}]",
+                )
+            if result.error:
+                criterion.verdict = "fail"
+                return VerificationRecord(
+                    task_id=task_id, tier="T0", criteria=[criterion], overall="fail",
+                    residual_uncertainty=f"sandbox error [{result.backend}]: {result.error}",
+                )
+
+            passed = result.exit_code == 0
             criterion.verdict = "pass" if passed else "fail"
             return VerificationRecord(
-                task_id=task_id,
-                tier="T0",
-                criteria=[criterion],
+                task_id=task_id, tier="T0", criteria=[criterion],
                 overall="pass" if passed else "fail",
                 discriminating_tests_run=[target],
                 residual_uncertainty=""
                 if passed
-                else (proc.stdout + proc.stderr)[-2000:],
-            )
-        except subprocess.TimeoutExpired:
-            criterion.verdict = "fail"
-            return VerificationRecord(
-                task_id=task_id,
-                tier="T0",
-                criteria=[criterion],
-                overall="fail",
-                residual_uncertainty=f"pytest timed out after {_PYTEST_TIMEOUT_S}s",
+                else (result.stdout + result.stderr)[-2000:],
             )
         finally:
             cleanup(ws)

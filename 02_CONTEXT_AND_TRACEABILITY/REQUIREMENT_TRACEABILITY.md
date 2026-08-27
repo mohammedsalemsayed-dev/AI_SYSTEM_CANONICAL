@@ -30,8 +30,8 @@ plus the records added in [DESIGN_TIGHTENING.md](../DESIGN_TIGHTENING.md) §3
 | Specialized independent agents | Complete Spec agent/decision sections | Orchestrator + role contracts | `AgentMessage`, `RunPlan` | E | Integration, Failure | FOUNDATION |
 | Intent / prompt compilation | Complete Spec §8 / D14 | Interpreter + immutable request | `OriginalRequest`, `TaskContract` | B | Unit, Integration | FOUNDATION (slice: Interpreter + no-verifiable-T0 guard) |
 | Meaningful progress / loop detection | D3 / D4 / contracts | Progress observer | `ProgressEvent`, `Observation` | D | Unit, Failure, Recovery | FOUNDATION |
-| Workspace + capability security | Security section / D12 | Policy / capability / execution boundary | `ActionProposal`, `PolicyDecision`, `CapabilityGrant` | C | Security | FOUNDATION ONLY |
-| Approval levels | broader requirements + security | Approval service | `PolicyDecision` (`REQUIRE_APPROVAL`) | C | Security | NOT YET IMPLEMENTED |
+| Workspace + capability security | Security section / D12 | Policy / capability / execution boundary | `ActionProposal`, `PolicyDecision`, `CapabilityGrant` | C | Security | FOUNDATION (slice: capability registry + scoped grants + 7-rule Policy Engine; sandbox runtime pending Docker) |
+| Approval levels | broader requirements + security | Approval service | `PolicyDecision` (`REQUIRE_APPROVAL`), `ApprovalRequest/Decision` | C | Security | FOUNDATION (slice: `REQUIRE_APPROVAL` -> `WAITING_FOR_USER` -> `resume(approval=...)`) |
 | Recovery / idempotency / reconciliation | Recovery architecture | Checkpoints / reconciliation | `Checkpoint`, `ReconcileDecision` | D | Recovery | FOUNDATION |
 | Hierarchical memory | Memory section / D6 | Memory / retrieval / context builder | `ProjectMemory` (working/project/experience/system) | F | Unit, Integration | NOT YET IMPLEMENTED |
 | Experience repository | D5 + memory/learning | Experience lifecycle / evaluation | `ExperienceRecord` (+ `guardrail_result`, `shadow_replay_log`) | F | Integration, Benchmark | FOUNDATION |
@@ -53,7 +53,7 @@ plus the records added in [DESIGN_TIGHTENING.md](../DESIGN_TIGHTENING.md) §3
 | Test gates | acceptance strategy | unit / integration / failure / security / recovery / resource / benchmark | `VerificationRecord` (tiers T0–T3) | A → I (all) | all | FOUNDATION ONLY |
 | End-to-end independent verification | Complete Spec completion + DESIGN_TIGHTENING §5 | Verification ladder T0–T3 | `VerificationRecord` | B (T0/T2), E (independent Verifier) | Integration, Security | FOUNDATION (slice: T0 tier — fresh checkout + apply diff + pytest) |
 | Budget / cost-latency control | DESIGN_TIGHTENING §11.1 | budget tracker + scheduler admission | `TaskContract.budget` | D | Resource, Failure | NOT YET IMPLEMENTED |
-| Prompt-injection defense | ACCEPTANCE security + DESIGN_TIGHTENING §12 | trust levels + injection corpus | `EvidenceRecord.trust_level` | CD-research | Security | NOT YET IMPLEMENTED |
+| Prompt-injection defense | ACCEPTANCE security + DESIGN_TIGHTENING §12 | trust levels + injection corpus | `ActionProposal.trust`, `EvidenceRecord.trust_level` | C, CD-research | Security | FOUNDATION (slice: structural taint + `tainted-side-effect` rule + 26-case corpus + traversal battery) |
 | Task taxonomy (`task_class`) | DESIGN_TIGHTENING §6 | Interpreter classification rubric | `TaskContract.task_class` | B | Unit | FOUNDATION (slice: 9-class enum assigned at interpretation) |
 | Canonical event log + derived views | Master Spec 4.3 / DESIGN_TIGHTENING §1, §11.2 | append-only log + folds | all records (creation events) | A | Recovery, Integration | FOUNDATION (slice: SQLite append-only log + snapshot projection, replay-tested) |
 
