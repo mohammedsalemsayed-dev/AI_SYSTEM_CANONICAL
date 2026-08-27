@@ -247,6 +247,26 @@ class TaskResult(BaseModel):
     summary: str = ""
 
 
+ProgressClass = Literal[
+    "HEALTHY_PROGRESS",
+    "SLOW_PROGRESS",
+    "STALLED",
+    "LOOP_RISK",
+    "RESOURCE_LIMITED",
+]
+
+
+class ProgressEvent(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("prg"))
+    task_id: str
+    step_index: int
+    classification: ProgressClass = "HEALTHY_PROGRESS"
+    signals: list[str] = Field(default_factory=list)  # hard-progress signals that fired
+    hard_progress: bool = False
+    no_progress_run: int = 0
+    detail: str = ""
+
+
 class AgentMessage(BaseModel):
     sender: str
     role: str

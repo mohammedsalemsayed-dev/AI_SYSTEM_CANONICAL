@@ -42,6 +42,12 @@ class EventKind:
     APPROVAL_DECISION = "APPROVAL_DECISION"
     EGRESS_BLOCKED = "EGRESS_BLOCKED"
     TAINT_BLOCKED = "TAINT_BLOCKED"
+    # Milestone D — recovery and progress
+    PROGRESS = "PROGRESS"
+    CHECKPOINT = "CHECKPOINT"
+    RECONCILE = "RECONCILE"
+    BUDGET = "BUDGET"
+    ESCALATION = "ESCALATION"
 
 
 class Event(BaseModel):
