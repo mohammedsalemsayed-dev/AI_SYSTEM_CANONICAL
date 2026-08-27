@@ -28,7 +28,17 @@ from app.schemas.contracts import (
 from app.services.build.workspace_copy import cleanup, copy_workspace
 from app.services.capability.issue import CapabilityError, issue_grant
 from app.services.capability.registry import primary_operation
+from app.services.escalation.ladder import Ladder
+from app.services.progress.loop import LoopDetector, action_hash
+from app.services.progress.measure import measure_step
+from app.services.progress.patience import patience_for
+from app.services.progress.service import ProgressService
+from app.services.sandbox import SandboxSpec, select_runner
+from app.services.verify.verifier_t0 import extract_pytest_target
 from app.services.workspace.listing import list_workspace
+
+_PYTEST_TIMEOUT_S = 300
+_MAX_STEPS = 16  # hard safety cap on the execution loop
 
 
 class TransitionError(RuntimeError):
@@ -49,6 +59,16 @@ class ApprovalPause(Exception):
         self.reason = reason
 
 
+class StalledEscalation(Exception):
+    """Raised when the escalation ladder for a STALLED / LOOP_RISK step reaches
+    'ask_user' — the task pauses for human input."""
+
+    def __init__(self, classification: str, detail: str) -> None:
+        super().__init__(detail)
+        self.classification = classification
+        self.detail = detail
+
+
 _TERMINAL = {State.COMPLETED, State.FAILED, State.CANCELLED}
 
 
@@ -63,6 +83,7 @@ class Orchestrator:
         policy,
         *,
         workspace_lister: Callable[[str], str] = list_workspace,
+        runner=None,
     ) -> None:
         self.log = log
         self.interpreter = interpreter
@@ -71,6 +92,12 @@ class Orchestrator:
         self.verifier = verifier
         self.policy = policy
         self.workspace_lister = workspace_lister
+        self._runner = runner  # per-step measurement sandbox; lazy if None
+
+    def _step_runner(self):
+        if self._runner is None:
+            self._runner = select_runner(require_isolation=False)
+        return self._runner
 
     # ------------------------------------------------------------------ #
     def run(self, request_text: str, workspace_path: str) -> TaskResult:
@@ -198,6 +225,25 @@ class Orchestrator:
                 f"waiting for approval: {pause.reason}",
                 state=State.WAITING_FOR_USER,
             )
+        except StalledEscalation as stall:
+            self.log.append(
+                task_id,
+                EventKind.CLARIFICATION,
+                ClarificationRequest(
+                    task_id=task_id,
+                    questions=[
+                        f"Task is {stall.classification} after the escalation ladder "
+                        f"({stall.detail}). How should it proceed?"
+                    ],
+                    why="stalled / looping after automated recovery",
+                ),
+            )
+            self._transition(task_id, State.WAITING_FOR_USER)
+            return self._finish(
+                task_id,
+                f"{stall.classification.lower()} after escalation ladder: {stall.detail}",
+                state=State.WAITING_FOR_USER,
+            )
 
         self._transition(task_id, State.VERIFYING)
         verification = self.verifier.verify(
@@ -287,80 +333,184 @@ class Orchestrator:
         approved_steps: set[str],
     ) -> str:
         ws = copy_workspace(workspace_path)
+        target = extract_pytest_target(contract.required_evidence)
+        progress = ProgressService(task_id, patience_for(contract.task_class))
+        loop = LoopDetector()
+        ladder = Ladder()
         combined_diff = ""
         try:
-            for step in plan.steps:
-                # Capabilities are frozen from the trusted Plan, before execution
-                # and before any untrusted content is fetched (DESIGN_TIGHTENING 14.3).
-                try:
-                    grant = issue_grant(
-                        task_id, step, workspace_root=ws, network_allowlist=[]
-                    )
-                except CapabilityError as exc:
-                    raise BuildError(str(exc)) from exc
-                self.log.append(task_id, EventKind.CAPABILITY_GRANT, grant)
+            # baseline measurement — tests before any edit
+            base_out = self._run_target(ws, target)
+            progress.observe(
+                measure_step(0, pytest_output=base_out, changed_paths=[], diff_text="")
+            )
 
-                proposal = ActionProposal(
-                    task_id=task_id,
-                    step_id=step.id,
-                    operation=primary_operation(step.required_capability),
-                    arguments={"path": ws, "intent": step.intent},
-                    required_capability=step.required_capability,
-                    workspace_scope=ws,
-                    expected_effect=step.expected_artifact_delta,
-                    idempotency_key=f"{task_id}:{step.id}",
+            steps = list(plan.steps)
+            i = 0
+            executed = 0
+            while i < len(steps):
+                if executed >= _MAX_STEPS:
+                    raise BuildError(f"execution exceeded {_MAX_STEPS} steps")
+                step = steps[i]
+                executed += 1
+
+                proposal, out = self._run_step(
+                    task_id, contract, step, ws, approved_steps
                 )
-                self.log.append(task_id, EventKind.ACTION_PROPOSAL, proposal)
+                if out is None:  # REQUIRE_APPROVAL pause was raised inside _run_step
+                    return combined_diff  # unreachable; _run_step raises
+                combined_diff = out.diff or combined_diff
 
-                decision = self.policy.decide(proposal, contract, grant)
-                self.log.append(task_id, EventKind.POLICY_DECISION, decision)
-
-                if decision.decision == "REQUIRE_APPROVAL":
-                    if step.id not in approved_steps:
-                        raise ApprovalPause(
-                            proposal.action_id, step.id, decision.reason
-                        )
-                    # already approved -> fall through and execute
-                elif decision.decision != "ALLOW":
-                    if decision.rule == "tainted-side-effect":
-                        self.log.append(
-                            task_id,
-                            EventKind.TAINT_BLOCKED,
-                            {"action_id": proposal.action_id, "reason": decision.reason},
-                        )
-                    raise BuildError(
-                        f"policy {decision.decision} [{decision.rule}]: {decision.reason}"
-                    )
-
-                out = self.builder.execute(
-                    task_id=task_id, step=step, contract=contract, workspace=ws
-                )
-                artifact = ArtifactVersion(
-                    task_id=task_id,
+                step_out = self._run_target(ws, target)
+                m = measure_step(
+                    executed,
+                    pytest_output=step_out,
                     changed_paths=out.changed_paths,
-                    diff=out.diff,
-                    bytes=len(out.diff.encode("utf-8")),
+                    diff_text=out.diff,
+                    stderr=out.stderr,
                 )
-                self.log.append(task_id, EventKind.ARTIFACT, artifact)
+                pe = progress.observe(m)
+                lr = loop.record(
+                    act_hash=action_hash(proposal.operation, ws, proposal.arguments),
+                    error_signature=m.error_signature,
+                    diff_text=out.diff,
+                    made_progress=pe.hard_progress,
+                )
+                effective = "LOOP_RISK" if lr.loop_risk else pe.classification
                 self.log.append(
                     task_id,
-                    EventKind.OBSERVATION,
-                    Observation(
-                        task_id=task_id,
-                        step_id=step.id,
-                        exit_code=out.exit_code,
-                        stdout=out.stdout[-4000:],
-                        stderr=out.stderr[-4000:],
-                        artifact_ref=artifact.id,
-                        error=out.error,
-                    ),
+                    EventKind.PROGRESS,
+                    pe.model_dump(mode="json")
+                    | {"loop_flags": lr.flags, "effective_class": effective},
                 )
-                if out.error or out.exit_code != 0:
-                    raise BuildError(out.error or f"builder exited {out.exit_code}")
-                combined_diff = out.diff
+
+                if effective in ("STALLED", "LOOP_RISK"):
+                    outcome, new_steps = self._run_ladder(
+                        task_id, contract, workspace_path, ladder,
+                        reason=effective, tried=pe.detail,
+                    )
+                    if outcome == "replanned":
+                        steps, i = new_steps, 0
+                        progress = ProgressService(
+                            task_id, patience_for(contract.task_class)
+                        )
+                        loop = LoopDetector()
+                        self._run_target(ws, target)  # rebaseline silently
+                        continue
+                    raise StalledEscalation(effective, pe.detail)
+
+                i += 1
             return combined_diff
         finally:
             cleanup(ws)
+
+    def _run_step(self, task_id, contract, step, ws, approved_steps):
+        """Grant -> proposal -> policy -> builder for one step. Returns
+        (proposal, BuildOutput). Raises ApprovalPause / BuildError."""
+        try:
+            grant = issue_grant(task_id, step, workspace_root=ws, network_allowlist=[])
+        except CapabilityError as exc:
+            raise BuildError(str(exc)) from exc
+        self.log.append(task_id, EventKind.CAPABILITY_GRANT, grant)
+
+        proposal = ActionProposal(
+            task_id=task_id,
+            step_id=step.id,
+            operation=primary_operation(step.required_capability),
+            arguments={"path": ws, "intent": step.intent},
+            required_capability=step.required_capability,
+            workspace_scope=ws,
+            expected_effect=step.expected_artifact_delta,
+            idempotency_key=f"{task_id}:{step.id}",
+        )
+        self.log.append(task_id, EventKind.ACTION_PROPOSAL, proposal)
+
+        decision = self.policy.decide(proposal, contract, grant)
+        self.log.append(task_id, EventKind.POLICY_DECISION, decision)
+        if decision.decision == "REQUIRE_APPROVAL":
+            if step.id not in approved_steps:
+                raise ApprovalPause(proposal.action_id, step.id, decision.reason)
+        elif decision.decision != "ALLOW":
+            if decision.rule == "tainted-side-effect":
+                self.log.append(
+                    task_id,
+                    EventKind.TAINT_BLOCKED,
+                    {"action_id": proposal.action_id, "reason": decision.reason},
+                )
+            raise BuildError(
+                f"policy {decision.decision} [{decision.rule}]: {decision.reason}"
+            )
+
+        out = self.builder.execute(
+            task_id=task_id, step=step, contract=contract, workspace=ws
+        )
+        artifact = ArtifactVersion(
+            task_id=task_id,
+            changed_paths=out.changed_paths,
+            diff=out.diff,
+            bytes=len(out.diff.encode("utf-8")),
+        )
+        self.log.append(task_id, EventKind.ARTIFACT, artifact)
+        self.log.append(
+            task_id,
+            EventKind.OBSERVATION,
+            Observation(
+                task_id=task_id,
+                step_id=step.id,
+                exit_code=out.exit_code,
+                stdout=out.stdout[-4000:],
+                stderr=out.stderr[-4000:],
+                artifact_ref=artifact.id,
+                error=out.error,
+            ),
+        )
+        if out.error or out.exit_code != 0:
+            raise BuildError(out.error or f"builder exited {out.exit_code}")
+        return proposal, out
+
+    def _run_target(self, ws: str, target: str | None) -> str:
+        if not target:
+            return ""
+        result = self._step_runner().run(
+            SandboxSpec(
+                workdir=ws,
+                command=["python", "-m", "pytest", *target.split(), "-q"],
+                network=False,
+                timeout_s=_PYTEST_TIMEOUT_S,
+            )
+        )
+        return (result.stdout or "") + (result.stderr or "")
+
+    def _run_ladder(self, task_id, contract, workspace_path, ladder, *, reason, tried):
+        """Advance the escalation ladder until an actionable rung. Returns
+        ("replanned", new_steps) or ("ask_user", None)."""
+        while not ladder.exhausted():
+            rung = ladder.advance()
+            self.log.append(
+                task_id,
+                EventKind.ESCALATION,
+                {
+                    "rung": rung.name,
+                    "reason": reason,
+                    "tried": tried,
+                    "actionable": rung.actionable,
+                },
+            )
+            if not rung.actionable:
+                continue
+            if rung.name == "change_strategy":
+                listing = self.workspace_lister(workspace_path)
+                note = (
+                    f"\n\nNOTE: the previous plan was {reason} ({tried}). "
+                    "Produce a materially different plan; do not repeat the same edit."
+                )
+                new_plan, prun = self.planner.plan(contract, listing + note)
+                self.log.append(task_id, EventKind.PLAN, new_plan)
+                self.log.append(task_id, EventKind.MODEL_RUN, prun)
+                return "replanned", list(new_plan.steps)
+            if rung.name == "ask_user":
+                return "ask_user", None
+        return "ask_user", None
 
     # ------------------------------------------------------------------ #
     def _snap(self, task_id: str) -> TaskSnapshot:

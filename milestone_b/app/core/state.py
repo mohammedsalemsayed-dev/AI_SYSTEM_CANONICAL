@@ -91,6 +91,7 @@ def gate_reason(target: State, snap: _Snapshot) -> tuple[bool, str]:
     if target is State.WAITING_FOR_USER:
         has_reason = bool(
             getattr(snap, "pending_approval", None)
+            or getattr(snap, "open_clarification", False)
             or (
                 snap.contract is not None
                 and (snap.contract.ambiguity or snap.contract_problems)

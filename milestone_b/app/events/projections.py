@@ -35,6 +35,7 @@ class TaskSnapshot:
     last_error: str | None = None
     pending_approval: str | None = None  # action_id awaiting an approval decision
     approved_steps: set[str] = field(default_factory=set)
+    open_clarification: bool = False  # a CLARIFICATION is awaiting a user answer
     capability_grants: list[dict[str, Any]] = field(default_factory=list)
     policy_decisions: list[dict[str, Any]] = field(default_factory=list)
     taint_blocks: list[dict[str, Any]] = field(default_factory=list)
@@ -60,6 +61,10 @@ def project_task(events: list[Event]) -> TaskSnapshot:
             snap.workspace_path = payload.get("workspace_path")
         elif kind == EventKind.STATE:
             snap.state = State(payload["state"])
+            if snap.state in (State.INTERPRETING, State.EXECUTING):
+                snap.open_clarification = False  # resuming clears the question
+        elif kind == EventKind.CLARIFICATION:
+            snap.open_clarification = True
         elif kind == EventKind.CONTRACT:
             snap.contract = TaskContract.model_validate(payload)
         elif kind == EventKind.PLAN:
