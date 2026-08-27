@@ -4,10 +4,12 @@ Runs a set of real tasks with the real providers (Anthropic LLM + Claude Agent
 SDK builder), records metrics, and writes SLICE_FINDINGS.md.
 
     pip install -e ".[llm]"
-    export SLICE_LLM_MODEL=<current-model-id>      # see the claude-api skill
     python -m tests.premise.run_real_tasks tests/premise/tasks.example.json
 
-Requires working Anthropic credentials / Agent SDK auth in the environment.
+Credentials: put `ANTHROPIC_API_KEY=...` (and optionally `SLICE_LLM_MODEL=...`)
+in `milestone_b/.env.local` — it is git-ignored and loaded by `_load_env_local`
+below. Any real environment variable already set takes precedence.
+
 `diff_correct` cannot be judged automatically — each task's diff and timeline are
 saved under findings_artifacts/<id>/ for you to score by hand, then fill the
 column in SLICE_FINDINGS.md.
@@ -16,9 +18,24 @@ column in SLICE_FINDINGS.md.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
+
+
+def _load_env_local() -> None:
+    """Load KEY=VALUE lines from .env.local without overriding real env vars."""
+    for candidate in (Path("milestone_b/.env.local"), Path(".env.local")):
+        if not candidate.exists():
+            continue
+        for raw in candidate.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+        return
 
 from app.events.log import EventKind, EventLog
 from app.orchestration.orchestrator import Orchestrator
@@ -65,9 +82,18 @@ def _save_artifacts(log: EventLog, task_id: str, out: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_env_local()
     argv = argv or sys.argv[1:]
     if not argv:
         print(__doc__)
+        return 2
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        print(
+            "No ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN found. Put "
+            "ANTHROPIC_API_KEY=... in milestone_b/.env.local (git-ignored) or set it "
+            "in the environment.",
+            file=sys.stderr,
+        )
         return 2
     tasks = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
 
