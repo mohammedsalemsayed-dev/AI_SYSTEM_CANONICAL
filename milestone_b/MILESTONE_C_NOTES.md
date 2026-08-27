@@ -1,7 +1,8 @@
 # Milestone C notes — what is real, what remains
 
-Status against [../MILESTONE_C_PLAN.md](../MILESTONE_C_PLAN.md). 132 tests green, 1 skipped
-(87 unit, 18 integration, 27 security).
+Status against [../MILESTONE_C_PLAN.md](../MILESTONE_C_PLAN.md). **133 tests green, 0 skipped**
+(87 unit, 18 integration, 28 security). Docker Desktop 29.5 installed; the Tier-A sandbox
+runs real containers and the "no host reach" test passes.
 
 ## Real after Milestone C
 
@@ -19,28 +20,25 @@ Status against [../MILESTONE_C_PLAN.md](../MILESTONE_C_PLAN.md). 132 tests green
 | Security gate | `tests/security/` | 26-case injection/abuse corpus + path-traversal battery + end-to-end objective-preservation; UNIT->INTEGRATION->FAILURE->**SECURITY**->RECOVERY |
 | Sandbox seam | `app/services/sandbox/` | `SandboxRunner` protocol; `DockerSandbox` (real, arg-verified by unit test); `SubprocessSandbox` dev-only fallback that refuses `allow_non_isolated=False`; `select_runner(require_isolation=)`; Verifier T0 routes pytest through it |
 
-## Not yet real — needs Docker Desktop
+## Tier-A sandbox — validated
 
-Days 7-9 are implemented but the **container has never actually run** on this machine
-(no Docker/Podman/WSL distro at build time; backend decision = Docker Desktop).
-
-To validate:
+Docker Desktop is installed and the runner image built:
 
 ```bash
-# after installing Docker Desktop and starting it
 cd milestone_b
 docker build -t slice-sandbox:pytest app/services/sandbox/images/pytest-runner
-python -m app.services.sandbox.docker_backend --selftest        # expect "sandbox ok"
+python -m app.services.sandbox.docker_backend --selftest        # -> "sandbox ok"
 ```
 
-Then:
-- `select_runner` will return `DockerSandbox` instead of the fallback; the Verifier T0 pytest
-  run executes `--network none`, read-only rootfs, cgroup-limited.
-- Enable `tests/security/test_security_gate.py::test_sandboxed_pytest_has_no_network`
-  (currently `skipif(True)`) and implement it: run a pytest that tries `urllib.request.urlopen`
-  and assert it fails inside the sandbox.
-- Consider a real-run guard in the CLI: pass `require_isolation=True` to `VerifierT0` for
-  `SLICE_LLM=anthropic` / tainted runs so the fallback is refused.
+`select_runner(require_isolation=...)` now returns `DockerSandbox`; the Verifier T0 pytest
+run executes in a container with `--network none`, read-only rootfs + tmpfs, cgroup cpu/mem/
+pid limits, all caps dropped, `no-new-privileges`. `test_sandboxed_pytest_has_no_network`
+confirms a sandboxed test cannot reach `example.com`.
+
+Remaining niceties (not blockers):
+- CLI real-run guard: pass `require_isolation=True` to `VerifierT0` for `SLICE_LLM=anthropic`
+  / tainted runs so the non-isolating fallback is refused if Docker is ever down.
+- The image rebuilds are manual; a `make sandbox-image` or a check-on-startup would help.
 
 ## Deferred past Milestone C (unchanged from the plan)
 

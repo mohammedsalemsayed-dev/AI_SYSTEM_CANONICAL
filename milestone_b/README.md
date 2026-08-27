@@ -36,14 +36,15 @@ See [MILESTONE_C_NOTES.md](MILESTONE_C_NOTES.md) for what is real vs. pending.
 | 3–4 | Policy Engine (7 ordered rules) replaces `AllowAllPolicy` | **done** |
 | 5 | Structural taint boundary + side-effecting check | **done** |
 | 6 | Egress broker (per-task allowlist, default deny) | **done** |
-| 7–9 | Tier-A sandbox: `SandboxRunner`, `DockerSandbox` (arg-verified), fallback, verifier wired | **code done; container not yet run — install Docker Desktop, then `docker build` + `--selftest`** |
+| 7–9 | Tier-A sandbox: `SandboxRunner`, `DockerSandbox`, fallback, verifier wired | **done — Docker 29.5 installed, image built, real containers run** |
 | 10 | Approval flow: `REQUIRE_APPROVAL` → `WAITING_FOR_USER` → `resume(approval=…)` | **done** |
 | 11 | Secret isolation: `SecretStore` + `scrub_env`, both backends scrub | **done** |
 | 12 | Audit: new event kinds + projection fields | **done** |
-| 13–14 | Security gate: 26-case injection corpus + traversal battery + objective-preservation | **done (1 test skipped — needs Docker)** |
+| 13–14 | Security gate: injection corpus + traversal battery + objective-preservation + no-network | **done** |
 | 15 | Wire-up, status update, notes | **done** |
 
-132 tests green + 1 skipped (`python -m pytest`): 87 unit, 18 integration, 27 security.
+133 tests green (`python -m pytest`): 87 unit, 18 integration, 28 security.
+Sandbox setup: `docker build -t slice-sandbox:pytest app/services/sandbox/images/pytest-runner`
 
 ## Day 10 handoff
 

@@ -106,10 +106,60 @@ def test_end_to_end_objective_not_drifted_by_noisy_request(sample_repo: str) -> 
     log.close()
 
 
+def _docker_ready() -> bool:
+    from app.services.sandbox.docker_backend import DockerSandbox
+
+    box = DockerSandbox()
+    return box.available() and box.image_present()
+
+
 @pytest.mark.skipif(
-    True,
-    reason="'no host reach' assertion needs the Docker sandbox running "
-    "(MILESTONE_C_PLAN.md section 4); enable once slice-sandbox:pytest is built",
+    not _docker_ready(),
+    reason="needs Docker + the slice-sandbox:pytest image "
+    "(docker build -t slice-sandbox:pytest app/services/sandbox/images/pytest-runner)",
 )
-def test_sandboxed_pytest_has_no_network() -> None:  # pragma: no cover
-    raise AssertionError("enable after Docker Desktop is installed")
+def test_sandboxed_pytest_has_no_network(tmp_path) -> None:
+    """A pytest run inside the sandbox must not reach the network."""
+    import subprocess
+
+    from app.schemas.contracts import TaskContract
+    from app.services.verify.verifier_t0 import VerifierT0
+
+    repo = tmp_path / "netcheck"
+    repo.mkdir()
+    (repo / "probe.py").write_text("VALUE = 1\n", encoding="utf-8", newline="\n")
+    (repo / "test_net.py").write_text(
+        "import urllib.request\n"
+        "import pytest\n"
+        "from probe import VALUE\n"
+        "\n"
+        "def test_value():\n"
+        "    assert VALUE == 2\n"
+        "\n"
+        "def test_network_is_blocked():\n"
+        "    with pytest.raises(Exception):\n"
+        "        urllib.request.urlopen('http://example.com', timeout=5)\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "i"]):
+        subprocess.run(
+            ["git", "-c", "user.email=x@x", "-c", "user.name=x", *args],
+            cwd=repo, check=True, capture_output=True,
+        )
+    diff = (
+        "diff --git a/probe.py b/probe.py\n"
+        "--- a/probe.py\n+++ b/probe.py\n"
+        "@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n"
+    )
+    contract = TaskContract(
+        task_id="t", original_request="r", objective="o",
+        success_criteria=["net blocked"],
+        required_evidence=["T0: pytest test_net.py passes"],
+    )
+    verifier = VerifierT0(require_isolation=True)
+    assert verifier.backend == "docker"
+    record = verifier.verify(
+        task_id="t", contract=contract, diff=diff, original_workspace=str(repo)
+    )
+    assert record.overall == "pass", record.residual_uncertainty
