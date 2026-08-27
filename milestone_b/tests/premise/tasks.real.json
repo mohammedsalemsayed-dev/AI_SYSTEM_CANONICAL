@@ -1,0 +1,27 @@
+[
+  {
+    "id": "mit-01-chunked-negative",
+    "request": "Raise a clear ValueError for negative n in chunked(). The failing test is tests/test_more.py::ChunkedTests::test_negative.",
+    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos_real/mit-01-chunked-negative"
+  },
+  {
+    "id": "mit-02-interleave-evenly-empty",
+    "request": "handle empty interleave_evenly input. The failing test is tests/test_more.py::InterleaveEvenlyTests::test_no_iterables.",
+    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos_real/mit-02-interleave-evenly-empty"
+  },
+  {
+    "id": "mit-03-numeric-range-reversed-empty",
+    "request": "Fix empty ranges in numeric_range.__reversed__. The failing test is tests/test_more.py::NumericRangeTests::test_empty_reversed.",
+    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos_real/mit-03-numeric-range-reversed-empty"
+  },
+  {
+    "id": "mit-04-product-index-iterator",
+    "request": "Fix product_index() with iterator input. The failing test is tests/test_more.py::ProductIndexTests::test_iterator_input.",
+    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos_real/mit-04-product-index-iterator"
+  },
+  {
+    "id": "mit-05-running-min-max-stability",
+    "request": "Fix stability in running_min and running_max. The failing test is tests/test_more.py::TestRunningMin::test_stability tests/test_more.py::TestRunningMax::test_stability.",
+    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos_real/mit-05-running-min-max-stability"
+  }
+]

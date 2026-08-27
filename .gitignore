@@ -17,6 +17,7 @@ dist/
 milestone_b/slice_events.db
 milestone_b/findings_artifacts/
 milestone_b/premise_repos/
+milestone_b/premise_repos_real/
 
 # OS
 .DS_Store

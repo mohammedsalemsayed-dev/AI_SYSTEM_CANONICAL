@@ -69,11 +69,14 @@ stubbed):
 - workspace-copy isolation (temp dir; not a hardened sandbox);
 - `resume()` light recovery (interrupted task fails cleanly, workspace untouched).
 
-Day 10 (premise test) — **done**. 10 seeded tasks through the real loop (Agent SDK for
-Interpreter/Planner/Builder on a Claude Pro subscription, VerifierT0 in the Docker Tier-A
-sandbox): **10/10 COMPLETED, 10/10 T0 pass, 10/10 diffs correct**, ~22 s/task. Per
-MILESTONE_B_PLAN.md §7 the premise holds. Caveats: bugs are small single-function fixes with
-a named failing test; seeded not real; see `milestone_b/SLICE_FINDINGS.md`.
+Day 10 (premise test) — **done, premise holds**. Real loop = Agent SDK for
+Interpreter/Planner/Builder on a Claude Pro subscription + VerifierT0 in the Docker Tier-A
+sandbox. Two runs: 10 seeded single-function bugs (10/10 correct) and 5 real `more-itertools`
+bug-fix commits (4/5 correct; the 1 miss was a behaviourally-right fix with the wrong exact
+assert message, **caught by T0**, never marked COMPLETED). Combined **14/15 diffs correct,
+zero false positives, 15/15 unaided T0 criterion**. Per MILESTONE_B_PLAN.md §7 the premise
+holds. Surfaced weakness: the Builder doesn't reliably read the failing test before editing
+(§14.1 prompt-tuning, not a blocker). See `milestone_b/SLICE_FINDINGS.md`.
 
 ## Milestone C — security and authority (`milestone_b/`, days 1–15; sandbox runtime pending)
 
