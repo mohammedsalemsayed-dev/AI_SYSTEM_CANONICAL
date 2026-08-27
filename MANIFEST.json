@@ -196,6 +196,11 @@
       "path": "MILESTONE_C_PLAN.md",
       "sha256": "69c4cb5d108633e7a7e21b952b824e185a67e7926eebce585791954943f19b5d",
       "bytes": 13825
+    },
+    {
+      "path": "MILESTONE_D_PLAN.md",
+      "sha256": "53b2448aff56349b2294d7085b76210ee5f89cb5a94ea28e30fe08716505d4d5",
+      "bytes": 12312
     }
   ]
 }
