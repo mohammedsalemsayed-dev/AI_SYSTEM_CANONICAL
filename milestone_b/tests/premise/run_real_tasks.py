@@ -1,14 +1,18 @@
 """Day 10 — the premise test (MILESTONE_B_PLAN.md section 7).
 
-Runs a set of real tasks with the real providers (Anthropic LLM + Claude Agent
-SDK builder), records metrics, and writes SLICE_FINDINGS.md.
+Runs a set of real tasks with the real providers, records metrics, and writes
+SLICE_FINDINGS.md.
 
     pip install -e ".[llm]"
     python -m tests.premise.run_real_tasks tests/premise/tasks.example.json
 
-Credentials: put `ANTHROPIC_API_KEY=...` (and optionally `SLICE_LLM_MODEL=...`)
-in `milestone_b/.env.local` — it is git-ignored and loaded by `_load_env_local`
-below. Any real environment variable already set takes precedence.
+Auth (default: no API key, no per-token spend):
+  - SLICE_LLM=agent_sdk (default) — Interpreter/Planner via a single-turn Claude
+    Agent SDK query, Builder via the Agent SDK. Both use the `claude` CLI's
+    subscription OAuth. Requires a logged-in `claude` CLI (run `claude` once).
+  - SLICE_LLM=anthropic — raw Messages API; put `ANTHROPIC_API_KEY=...` (and
+    optionally `SLICE_LLM_MODEL=...`) in `milestone_b/.env.local` (git-ignored,
+    loaded below). Billed per token.
 
 `diff_correct` cannot be judged automatically — each task's diff and timeline are
 saved under findings_artifacts/<id>/ for you to score by hand, then fill the
@@ -38,6 +42,7 @@ def _load_env_local() -> None:
         return
 
 from app.events.log import EventKind, EventLog
+from app.llm import get_llm
 from app.orchestration.orchestrator import Orchestrator
 from app.services.build.agent_sdk import AgentSDKBuilder
 from app.services.interpret.interpreter import Interpreter
@@ -45,7 +50,6 @@ from app.services.plan.planner import Planner
 from app.services.policy.engine import PolicyEngine
 from app.services.verify.verifier_t0 import VerifierT0
 from app.services.workspace.listing import is_git_repo
-from app.llm.anthropic_client import AnthropicLLM
 
 _ARTIFACTS = Path("findings_artifacts")
 _FINDINGS = Path("SLICE_FINDINGS.md")
@@ -87,11 +91,14 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         print(__doc__)
         return 2
-    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+    llm_kind = os.environ.get("SLICE_LLM", "agent_sdk")
+    if llm_kind == "anthropic" and not (
+        os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    ):
         print(
-            "No ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN found. Put "
-            "ANTHROPIC_API_KEY=... in milestone_b/.env.local (git-ignored) or set it "
-            "in the environment.",
+            "SLICE_LLM=anthropic but no ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN. Put "
+            "ANTHROPIC_API_KEY=... in milestone_b/.env.local, or use the default "
+            "SLICE_LLM=agent_sdk (subscription auth, no key).",
             file=sys.stderr,
         )
         return 2
@@ -102,7 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     if db.exists():
         db.unlink()
     log = EventLog(db)
-    llm = AnthropicLLM()
+    llm = get_llm(llm_kind)
+    print(f"LLM: {llm.provider} ({llm.model})  Builder: agent_sdk")
     orch = Orchestrator(
         log,
         Interpreter(llm),
