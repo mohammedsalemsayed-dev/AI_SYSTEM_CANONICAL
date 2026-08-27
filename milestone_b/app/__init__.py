@@ -1,0 +1,1 @@
+"""Milestone B vertical slice."""

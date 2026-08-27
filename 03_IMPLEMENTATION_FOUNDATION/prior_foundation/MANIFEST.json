@@ -1,0 +1,33 @@
+{
+  "package": "Autonomous Multi-Agent AI System FINAL",
+  "canonical": true,
+  "version": "FINAL-1.0",
+  "files": [
+    "README.md",
+    "scripts/verify_repository.py",
+    "docs/FINAL_AUDIT.md",
+    "docs/00_MASTER_SPEC.md",
+    "docs/architecture/END_TO_END_ARCHITECTURE.md",
+    "docs/decision_history/ACTIVE_DECISIONS.md",
+    "docs/operations/CLAUDE_CODE_INSTRUCTIONS.md",
+    "docs/source_basis/README.md",
+    "docs/testing/ACCEPTANCE.md",
+    "docs/contracts/CORE_CONTRACTS.md",
+    "docs/implementation/IMPLEMENTATION_PLAN.md",
+    "apps/backend/pyproject.toml",
+    "apps/desktop/package.json",
+    "apps/desktop/src/App.tsx",
+    "apps/desktop/src/style.css",
+    "apps/backend/app/core/state.py",
+    "apps/backend/app/api/main.py",
+    "apps/backend/app/schemas/contracts.py",
+    "apps/backend/app/services/security/workspace.py",
+    "apps/backend/app/services/routing/router.py",
+    "apps/backend/app/services/progress/service.py",
+    "apps/backend/app/services/recovery/reconcile.py",
+    "apps/backend/app/services/experience/lifecycle.py",
+    "apps/backend/app/services/orchestration/orchestrator.py",
+    "apps/backend/app/services/hardware/policy.py",
+    "apps/backend/tests/unit/test_invariants.py"
+  ]
+}

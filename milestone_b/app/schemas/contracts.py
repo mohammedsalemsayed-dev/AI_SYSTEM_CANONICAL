@@ -1,0 +1,224 @@
+"""Canonical records for the slice.
+
+Ports the three records that already existed in the prior foundation
+(`TaskContract`, `ActionProposal`, `AgentMessage`) and adds the records named in
+DESIGN_TIGHTENING.md sections 1 and 3 that the end-to-end flow needs:
+`OriginalRequest`, `Plan`/`PlanStep`, `Observation`, `ArtifactVersion`,
+`VerificationRecord`, `ModelRunRecord`, `TaskResult`.
+
+`validate_contract` implements the gate for leaving `INTERPRETING`
+(DESIGN_TIGHTENING.md section 1): objective + >=1 success criterion + a
+`required_evidence` entry naming a runnable pytest T0 target.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+import uuid
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+TaskClass = Literal[
+    "qa_explain",
+    "code_edit_local",
+    "code_edit_broad",
+    "debug",
+    "research_web",
+    "doc_analysis",
+    "authoring",
+    "planning_arch",
+    "ops",
+]
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def now_ts() -> float:
+    return time.time()
+
+
+# --------------------------------------------------------------------------- #
+# capture / interpret
+# --------------------------------------------------------------------------- #
+class OriginalRequest(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("req"))
+    text: str
+    workspace_path: str
+    ts: float = Field(default_factory=now_ts)
+    attachments: list[str] = Field(default_factory=list)
+
+
+class TaskContract(BaseModel):
+    task_id: str
+    original_request: str  # frozen copy of OriginalRequest.text
+    objective: str
+    task_class: TaskClass = "code_edit_local"
+    deliverables: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    ambiguity: list[str] = Field(default_factory=list)
+    success_criteria: list[str] = Field(default_factory=list)
+    required_evidence: list[str] = Field(default_factory=list)
+    risk_level: Literal["low", "medium", "high"] = "low"
+    workspace_id: str = ""
+    resource_sensitivity: str = "normal"
+
+
+class ClarificationRequest(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("clr"))
+    task_id: str
+    questions: list[str] = Field(default_factory=list)
+    why: str = ""
+    options: list[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# plan
+# --------------------------------------------------------------------------- #
+class PlanStep(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("step"))
+    intent: str
+    expected_artifact_delta: str
+    required_capability: str
+
+
+class Plan(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("plan"))
+    task_id: str
+    steps: list[PlanStep] = Field(default_factory=list)
+    supersedes: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# preflight / execute
+# --------------------------------------------------------------------------- #
+class ActionProposal(BaseModel):
+    action_id: str = Field(default_factory=lambda: new_id("act"))
+    task_id: str
+    step_id: str
+    operation: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    required_capability: str
+    workspace_scope: str
+    expected_effect: str
+    idempotency_key: str
+
+
+class PolicyDecision(BaseModel):
+    action_id: str
+    decision: Literal["ALLOW", "DENY", "REQUIRE_APPROVAL", "REQUIRE_VERIFICATION", "ESCALATE"]
+    reason: str = ""
+
+
+class CapabilityGrant(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("cap"))
+    task_id: str
+    scope_path: str
+    operations: list[str] = Field(default_factory=list)
+    ttl_s: float = 3600.0
+
+
+class ArtifactVersion(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("art"))
+    task_id: str
+    changed_paths: list[str] = Field(default_factory=list)
+    diff: str = ""
+    bytes: int = 0
+
+
+class Observation(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("obs"))
+    task_id: str
+    step_id: str
+    exit_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
+    artifact_ref: str | None = None
+    error: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# verify / settle
+# --------------------------------------------------------------------------- #
+class CriterionVerdict(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("crit"))
+    criterion: str
+    verdict: Literal["pass", "fail", "unknown"] = "unknown"
+    evidence_ref: str | None = None
+
+
+class VerificationRecord(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("ver"))
+    task_id: str
+    tier: Literal["T0", "T1", "T2", "T3"] = "T0"
+    criteria: list[CriterionVerdict] = Field(default_factory=list)
+    overall: Literal["pass", "fail"] = "fail"
+    discriminating_tests_run: list[str] = Field(default_factory=list)
+    residual_uncertainty: str = ""
+
+
+class ModelRunRecord(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("run"))
+    task_id: str
+    role: str  # interpreter | planner | builder
+    provider: str = ""
+    model: str = ""
+    latency_s: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    # link to a VerificationRecord.id once the run is "scored" (DESIGN_TIGHTENING.md section 7)
+    verification_result: str | None = None
+    failure_mode: str | None = None
+
+
+class TaskResult(BaseModel):
+    task_id: str
+    state: str
+    verified: bool = False
+    artifact_ref: str | None = None
+    verification_ref: str | None = None
+    summary: str = ""
+
+
+class AgentMessage(BaseModel):
+    sender: str
+    role: str
+    task_id: str
+    intent: str
+    claims: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    requested_action: str | None = None
+    confidence_summary: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# contract gate (leave INTERPRETING)
+# --------------------------------------------------------------------------- #
+_T0_PYTEST_RE = re.compile(r"pytest\s+\S+", re.IGNORECASE)
+
+
+def validate_contract(contract: TaskContract) -> list[str]:
+    """Return a list of problems. Empty list means the contract passes the
+    INTERPRETING gate. A non-empty list is a reason to enter WAITING_FOR_USER."""
+    problems: list[str] = []
+    if not contract.objective.strip():
+        problems.append("objective is empty")
+    if not contract.success_criteria:
+        problems.append("no success_criteria")
+    if not contract.required_evidence:
+        problems.append("no required_evidence")
+    else:
+        has_t0 = any(
+            ("t0" in e.lower()) and _T0_PYTEST_RE.search(e) for e in contract.required_evidence
+        )
+        if not has_t0:
+            problems.append(
+                "required_evidence names no runnable pytest T0 target "
+                "(expected an entry like 'T0: pytest tests/test_x.py::test_y passes')"
+            )
+    return problems

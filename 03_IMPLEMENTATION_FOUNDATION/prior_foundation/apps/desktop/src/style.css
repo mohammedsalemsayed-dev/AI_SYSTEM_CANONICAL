@@ -1,0 +1,10 @@
+*{box-sizing:border-box}body{margin:0;background:#07101c;color:#e7f0fa;font-family:Inter,system-ui}
+.app{height:100vh;display:grid;grid-template-columns:230px 1fr 280px;background:radial-gradient(circle at top,#17375a,#07101c 58%)}
+aside{padding:24px;background:#07111ed9;border-color:#203a56;border-style:solid} .left{border-width:0 1px 0 0}.right{border-width:0 0 0 1px}
+h1{letter-spacing:7px;font-size:18px}button{border:1px solid #3d7cae;background:#123653;color:#eaf5ff;border-radius:10px;padding:12px;cursor:pointer}.left button{width:100%}
+.nav,.agent,.metric{padding:12px;margin:9px 0;border:1px solid #213d59;border-radius:10px;background:#0a1928}.active{background:#12314b}
+small{display:block;color:#8ca7c1;margin-top:5px}.metric b{float:right;color:#77d9af;font-size:11px}
+main{display:grid;grid-template-rows:75px 1fr 92px}header{display:flex;justify-content:space-between;align-items:center;padding:0 28px;border-bottom:1px solid #203a56}header span{font-size:12px;color:#77d9af}
+.conversation{padding:36px;overflow:auto}article{max-width:75%;padding:16px;margin:12px 0;background:#0d2235;border:1px solid #244864;border-radius:14px}article.user{margin-left:auto;background:#12314b}article p{margin:8px 0 0;color:#c5d8e9}
+footer{padding:20px 28px;display:flex;gap:10px;border-top:1px solid #203a56}input{flex:1;background:#091827;border:1px solid #294b67;border-radius:12px;padding:15px;color:white}
+@media(max-width:900px){.app{grid-template-columns:1fr}.app>aside{display:none}}

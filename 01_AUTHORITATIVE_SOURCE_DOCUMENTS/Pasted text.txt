@@ -1,0 +1,964 @@
+Local AI Development & Research Workstation — Project Specification
+1. Goal
+
+Build a hybrid local/cloud AI workstation that acts as a knowledgeable technical partner rather than a simple chatbot.
+
+The AI should be capable of helping with serious, senior-level software projects, game development, research, professional documents, and presentations.
+
+The key philosophy is:
+
+The AI should not blindly agree with me or blindly implement what I ask. It should understand what I'm trying to accomplish, identify things I may have missed, challenge bad decisions, explain its reasoning, and recommend better approaches when appropriate.
+
+The system should feel more like working alongside a senior engineer/researcher/designer than using autocomplete.
+
+2. Current PC
+GPU: NVIDIA RTX 5060 — 8 GB VRAM
+RAM: 24 GB DDR5
+CPU: Intel Core i5-14400F
+Primary workloads:
+Serious software development
+Windows applications
+Android applications
+Godot game development
+Unreal Engine game development
+Research
+PDF/document analysis
+Professional Word/PDF documents
+Professional PowerPoint presentations
+Gamma-like presentation generation
+Local AI experimentation
+
+The system should be designed specifically around the 8 GB VRAM limitation, rather than assuming access to a high-end 24–48 GB GPU.
+
+3. Hybrid AI Philosophy
+
+The system should combine:
+
+Local AI
+
+Used for:
+
+Frequent coding
+Codebase searching
+Code explanations
+Routine debugging
+Refactoring
+Document analysis
+Summaries
+Research assistance
+Drafting
+Local/private information
+First-pass implementation
+Fast interactions
+Tasks where cloud AI isn't necessary
+
+Advantages:
+
+No per-request cost
+Privacy
+Works offline
+Very low latency for appropriately sized models
+Can interact directly with local projects/files
+Cloud AI
+
+Used selectively for:
+
+Extremely difficult reasoning
+Major architectural decisions
+Difficult debugging
+Complex research
+Problems beyond the local model's capabilities
+Second opinions
+High-level review
+Tasks where frontier models have a substantial advantage
+
+The objective isn't to replace cloud AI.
+
+The objective is:
+
+Use the local model for the majority of work and escalate difficult problems to stronger models when necessary.
+
+4. AI Personality / Behavior
+
+This is one of the most important requirements.
+
+The AI should not behave like an obedient assistant.
+
+It should behave like a knowledgeable peer who is potentially more experienced than the user.
+
+For example:
+
+Bad behavior
+
+User:
+
+"I'm going to put the entire inventory system inside the Player class."
+
+AI:
+
+"Sure! Here's the code."
+
+Desired behavior
+
+AI:
+
+"I'd stop before implementing that. It will work initially, but you're coupling inventory state to the Player actor. That becomes problematic when you introduce NPC inventories, multiplayer replication, persistence, or trading. I'd separate the inventory domain from the player and let the player own/reference it."
+
+The AI should actively identify:
+
+Hidden assumptions
+Edge cases
+Architectural problems
+Security problems
+Performance problems
+Scalability problems
+Maintainability issues
+Bad abstractions
+Unnecessary complexity
+Technical debt
+Incorrect premises
+Missing requirements
+
+It should be comfortable saying:
+
+"I don't think that's a good approach."
+
+It should also explain why rather than simply rejecting an idea.
+
+5. Senior-Level Software Development
+
+The coding environment should support actual products, not merely scripts and automation.
+
+Potential projects include:
+
+Windows applications
+Android applications
+Games
+Backend services
+APIs
+Databases
+Desktop software
+Tools
+Complex multi-module applications
+Potentially commercial/production software
+
+The AI should participate throughout:
+
+Idea
+ ↓
+Requirements
+ ↓
+Architecture
+ ↓
+Technology selection
+ ↓
+Implementation plan
+ ↓
+Implementation
+ ↓
+Testing
+ ↓
+Debugging
+ ↓
+Code review
+ ↓
+Performance review
+ ↓
+Security review
+ ↓
+Packaging
+ ↓
+Release
+
+6. Windows Development
+
+Potential technologies:
+
+C++
+C#
+.NET
+WinUI
+WPF
+Qt
+Windows APIs
+Desktop applications
+Background services
+Networking
+Databases
+GPU-accelerated applications
+Installers
+
+The AI should be able to:
+
+Design architecture
+Create projects
+Understand existing projects
+Modify multiple files
+Compile projects
+Diagnose build errors
+Run tests
+Refactor
+Review code
+Investigate crashes
+Analyze performance
+Generate documentation
+Prepare releases
+7. Android Development
+
+Potential technologies:
+
+Kotlin
+Jetpack Compose
+Android SDK
+Gradle
+Room
+Android networking
+Background services
+Notifications
+Permissions
+Local storage
+App architecture
+Testing
+Play Store preparation
+
+Potentially also:
+
+Flutter
+React Native
+.NET MAUI
+
+depending on the project.
+
+The AI should be able to understand the entire Android project, not merely individual files.
+
+8. Godot Development
+
+The AI should understand and work with actual Godot projects.
+
+Capabilities should include:
+
+GDScript
+C#
+Scenes
+Nodes
+Resources
+Signals
+Shaders
+Physics
+Rendering
+Animation
+Gameplay systems
+UI
+Save systems
+Inventory
+Dialogue
+Quests
+AI
+Procedural generation
+Multiplayer
+Performance optimization
+Project architecture
+Debugging
+Error logs
+
+Example:
+
+"The player occasionally falls through moving platforms."
+
+The AI should be able to inspect the relevant project files, trace the physics/platform implementation, identify likely causes, and explain the problem rather than merely suggesting random fixes.
+
+9. Unreal Engine Development
+
+The system should support serious Unreal development including:
+
+C++
+Blueprints
+Actors
+Components
+UObjects
+Gameplay Ability System
+Replication
+Multiplayer
+Networking
+AI
+Materials
+Shaders
+Niagara
+Plugins
+Build systems
+Performance
+Profiling
+Crash investigation
+Project architecture
+
+The AI should be able to reason about interactions between:
+
+C++
+Blueprints
+Assets
+Components
+Engine systems
+Replication
+Networking
+Build configuration
+10. Whole-Repository Understanding
+
+A fundamental requirement is that the AI should understand projects as systems, rather than isolated snippets.
+
+For example:
+
+MyProject/
+├── src/
+├── core/
+├── database/
+├── networking/
+├── authentication/
+├── services/
+├── ui/
+├── tests/
+├── docs/
+├── assets/
+├── config/
+└── README.md
+
+
+The AI should be able to:
+
+Search the repository
+Find references
+Trace dependencies
+Understand relationships between components
+Find potentially affected files
+Understand architecture
+Review changes across multiple files
+Identify regressions
+Work with Git
+Examine build/test results
+
+Example:
+
+"I changed authentication. What could this break?"
+
+The AI should search the actual repository and identify affected components.
+
+11. AI Coding Agent
+
+The system should eventually have an agent capable of:
+
+Reading files
+Searching files
+Creating files
+Modifying files
+Running commands
+Running builds
+Running tests
+Reading compiler errors
+Debugging
+Using Git
+Reviewing its own changes
+
+However, autonomy should be controlled.
+
+Level 1 — Advisor
+
+Can:
+
+Read
+Search
+Analyze
+Recommend
+
+Cannot modify files.
+
+Level 2 — Developer
+
+Can:
+
+Create files
+Modify code
+Run tests
+Compile
+
+Requires approval for potentially dangerous operations.
+
+Level 3 — Senior Engineer
+
+Can:
+
+Modify multiple files
+Refactor
+Run builds
+Run tests
+Investigate failures
+Perform architectural work
+Level 4 — Release Engineer
+
+Can:
+
+Run complete test suites
+Build releases
+Generate installers/APKs
+Inspect artifacts
+Generate release documentation
+
+Publishing/deployment should still require explicit human approval.
+
+12. Git and Version Control
+
+Git should be a fundamental part of the development environment.
+
+AI changes should be traceable.
+
+Desired workflow:
+
+AI proposes change
+       ↓
+Implementation
+       ↓
+Compile
+       ↓
+Tests
+       ↓
+AI review
+       ↓
+Human review
+       ↓
+Git commit
+
+
+This provides the ability to:
+
+Review changes
+Compare versions
+Roll back bad AI modifications
+Understand what the AI changed
+Experiment safely
+
+The AI should never be trusted as an infallible developer.
+
+13. Automated AI Code Review
+
+An important future feature is having the AI review its own work.
+
+Example:
+
+Implementation
+      ↓
+Compilation
+      ↓
+Tests
+      ↓
+Static analysis
+      ↓
+AI code review
+      ↓
+Security review
+      ↓
+Performance review
+      ↓
+Human approval
+
+
+The review should ask:
+
+Did the implementation satisfy the requirements?
+Is the architecture appropriate?
+Are there bugs?
+Are there edge cases?
+Is there unnecessary complexity?
+Is it secure?
+Is it performant?
+Is it maintainable?
+Will it scale?
+Does it introduce technical debt?
+Does it break existing behavior?
+14. Research System
+
+The AI should also function as a research assistant.
+
+Inputs:
+
+PDFs
+Research papers
+Books
+Websites
+Documentation
+Word documents
+PowerPoint files
+Notes
+Datasets
+
+Capabilities:
+
+Summarization
+Document analysis
+Information extraction
+Source comparison
+Contradiction detection
+Literature reviews
+Research questions
+Evidence gathering
+Citation generation
+Statistical interpretation
+Timeline creation
+Tables
+Cross-referencing
+Fact checking
+Research synthesis
+
+A key requirement:
+
+The AI should distinguish between what a source actually says and what it is inferring.
+
+15. Research RAG / Knowledge Base
+
+The eventual system should have a knowledge layer where documents can be indexed.
+
+Conceptually:
+
+PDFs
+Documents
+Papers
+Notes
+Web sources
+     ↓
+Document processing
+     ↓
+Chunking
+     ↓
+Embeddings
+     ↓
+Vector database
+     ↓
+Retrieval
+     ↓
+AI reasoning
+
+
+This allows the AI to answer questions using your actual research library rather than relying solely on model training.
+
+16. Professional Word/PDF Generation
+
+The system should eventually generate polished:
+
+Research reports
+Technical documentation
+Game design documents
+Software specifications
+Proposals
+Tutorials
+Manuals
+Academic-style reports
+Project documentation
+
+Desired workflow:
+
+Research
+ ↓
+Outline
+ ↓
+Sources
+ ↓
+Writing
+ ↓
+Fact checking
+ ↓
+Tables
+ ↓
+Charts
+ ↓
+Diagrams
+ ↓
+Formatting
+ ↓
+DOCX
+ ↓
+PDF
+
+
+The AI should control content and structure while dedicated document-generation tools handle reliable formatting.
+
+17. Gamma-Style Presentation Generation
+
+The presentation system should aim for professional visual quality, not simply AI-generated bullet points.
+
+Desired workflow:
+
+Research / source material
+          ↓
+Audience analysis
+          ↓
+Presentation objective
+          ↓
+Narrative
+          ↓
+Slide structure
+          ↓
+Content
+          ↓
+Charts / diagrams
+          ↓
+Images
+          ↓
+Visual theme
+          ↓
+Speaker notes
+          ↓
+PPTX
+          ↓
+PDF
+
+
+The AI should understand:
+
+Visual hierarchy
+Typography
+Slide density
+Storytelling
+Audience
+Charts
+Diagrams
+Visual consistency
+Speaker notes
+
+The goal is something closer to Gamma-quality presentation design, rather than a normal AI-generated PowerPoint full of paragraphs.
+
+18. Expert Modes
+
+Rather than one generic personality, the system should eventually support specialized expert roles.
+
+Senior Game Programmer
+
+Focus:
+
+Godot
+Unreal
+C++
+GDScript
+Gameplay architecture
+Optimization
+Multiplayer
+AI
+Rendering
+Physics
+Software Architect
+
+Focus:
+
+Architecture
+Coupling
+Abstraction
+Scalability
+Testing
+Maintainability
+Technical debt
+Research Analyst
+
+Focus:
+
+Evidence
+Sources
+Methodology
+Citations
+Contradictions
+Statistical reasoning
+Technical Writer
+
+Focus:
+
+Clarity
+Structure
+Terminology
+Documentation
+Presentation Designer
+
+Focus:
+
+Narrative
+Visual hierarchy
+Layout
+Typography
+Charts
+Diagrams
+Audience
+19. Senior Reviewer
+
+A separate review stage should be available.
+
+Example:
+
+User idea
+   ↓
+AI implementation / proposal
+   ↓
+Senior Reviewer
+   ↓
+Critique
+   ↓
+Improved proposal
+   ↓
+Implementation
+
+
+The reviewer should specifically look for things the original AI/user missed.
+
+Prompt philosophy:
+
+Assume the developer is competent but may have overlooked non-obvious problems. Identify hidden assumptions, edge cases, scalability problems, security issues, performance problems, architectural flaws, and maintainability issues. Do not blindly agree with the proposed solution.
+
+This is one of the most important features of the entire system.
+
+20. Tools the AI Will Eventually Need
+
+The AI shouldn't exist in isolation.
+
+Potential tools:
+
+AI
+│
+├── File system
+├── Terminal
+├── Git
+├── IDE
+├── Compiler
+├── Test runner
+├── Debugger
+├── Godot
+├── Unreal Engine
+├── Android tooling
+├── Documentation
+├── Web search
+├── PDF processing
+├── Research database
+├── Vector database
+├── DOCX generator
+├── PDF generator
+├── PPTX generator
+├── Chart generator
+├── Diagram generator
+└── Image generation
+
+
+This turns the AI from a chatbot into an agent capable of actually working on projects.
+
+21. MCP / Tool Calling
+
+Model Context Protocol and similar tool systems can eventually connect the AI to:
+
+Files
+Git
+Terminals
+Documentation
+Development tools
+Research databases
+Other software
+
+Tools must be treated carefully because some can potentially:
+
+Modify files
+Execute commands
+Access private data
+Access the network
+
+Therefore, tools should be installed selectively and given only the permissions they actually need.
+
+22. Hardware Strategy
+
+Current hardware:
+
+RTX 5060 8 GB + 24 GB DDR5
+
+The system should prioritize models that fit efficiently into VRAM.
+
+General strategy:
+
+Small/medium local model
+        ↓
+Mostly GPU
+        ↓
+Fast everyday operation
+
+
+Larger models can potentially use:
+
+GPU VRAM
++
+System RAM
+
+
+but CPU/RAM offloading can significantly reduce performance.
+
+Therefore:
+
+Don't automatically choose the biggest model that can technically run.
+
+A fast, capable model with good tooling can be much more useful than a much larger model running painfully slowly.
+
+23. Potential Local Model Strategy
+
+The exact models should not be permanently decided yet.
+
+Before building the final system, current models should be benchmarked specifically for:
+
+Coding
+Reasoning
+Tool calling
+Long-context handling
+Repository understanding
+Speed
+VRAM requirements
+Quantization quality
+
+Potential model classes include:
+
+~7–9B coding models for fast everyday work
+~14B reasoning models for harder local tasks
+~30B-class MoE models for difficult local coding where performance allows
+Cloud frontier models for the hardest problems
+
+The final selection should be based on actual 2026 model availability and the RTX 5060's 8 GB VRAM, rather than old recommendations.
+
+24. Skills the User Needs
+
+The user does not need to become an AI researcher.
+
+Level 1
+
+Learn:
+
+Basic terminal usage
+PowerShell
+Git
+VS Code
+Basic Python
+Installing software
+Environment variables
+APIs
+Basic JSON
+GPU/RAM/VRAM concepts
+Level 2
+
+Eventually learn:
+
+Python virtual environments
+pip
+REST APIs
+JSON
+Docker basics
+Embeddings
+Vector databases
+RAG
+Context windows
+Quantization
+Tool calling
+MCP
+Agents
+Structured outputs
+Level 3
+
+For eventually building/customizing the system:
+
+Python
+TypeScript
+APIs
+Databases
+Async programming
+Agent architecture
+Retrieval systems
+Evaluation
+Model benchmarking
+
+The user should learn these while building the system, rather than attempting to master everything beforehand.
+
+25. Proposed Overall Architecture
+                         YOU
+                          │
+                          ▼
+                  AI ORCHESTRATOR
+                          │
+              ┌───────────┼───────────┐
+              │           │           │
+              ▼           ▼           ▼
+           LOCAL        LOCAL       CLOUD
+           CODER       REASONER    FRONTIER
+              │           │           │
+              └───────────┼───────────┘
+                          │
+                     TOOL SYSTEM
+                          │
+       ┌──────────────────┼──────────────────┐
+       │                  │                  │
+       ▼                  ▼                  ▼
+   DEVELOPMENT         RESEARCH          CREATION
+       │                  │                  │
+       ├─ IDE             ├─ PDFs            ├─ DOCX
+       ├─ Git             ├─ Papers          ├─ PDF
+       ├─ Terminal        ├─ Web             ├─ PPTX
+       ├─ Compiler        ├─ RAG             ├─ Charts
+       ├─ Tests           └─ Sources         ├─ Diagrams
+       ├─ Godot                              └─ Images
+       └─ Unreal
+
+26. Final Vision
+
+The finished system should allow interactions like:
+
+You:
+"I want to build an Android research application that indexes academic PDFs and lets users search them semantically."
+
+The AI:
+
+"Before we choose the framework, there are three requirements that will affect the architecture: offline indexing, document size, and whether embeddings are generated on-device. Here's what I'd recommend..."
+
+Or:
+
+You:
+"Here's my Unreal multiplayer inventory architecture."
+
+AI:
+
+"I don't recommend implementing it this way. The architecture works for single-player, but you've introduced three problems with replication and state authority..."
+
+Or:
+
+You:
+"Turn these 12 research papers into a professional 15-slide presentation."
+
+AI:
+
+Researches → extracts evidence → compares sources → builds narrative → creates charts → designs slides → generates PPTX → reviews the presentation.
+
+The goal is therefore not:
+
+"I have a local ChatGPT."
+
+The goal is:
+
+"I have an AI development and research environment that works alongside me, understands my projects, has access to my tools and knowledge base, challenges my decisions, creates professional deliverables, and escalates difficult problems to stronger cloud models when necessary."
+
+Planned Build Order
+
+The eventual system should be built incrementally:
+
+Local AI foundation
+Model benchmarking for the RTX 5060
+Coding environment
+Repository/project awareness
+Git + controlled coding agent
+Build/test/debug integration
+Senior-review system
+Godot integration
+Unreal integration
+Windows/Android development workflows
+Research/PDF knowledge base
+Web research + citations
+DOCX/PDF generation
+Professional PowerPoint generation
+Image/diagram generation
+Hybrid cloud routing
+Automatic model selection/escalation
+Security/permissions
+Evaluation and benchmarking
+Polish into a unified personal AI workstation
+
+This is the specification to carry into the next conversation.

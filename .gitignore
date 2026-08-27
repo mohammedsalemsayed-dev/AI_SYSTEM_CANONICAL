@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+
+# slice runtime output
+*.db
+milestone_b/slice_events.db
+milestone_b/findings_artifacts/
+
+# OS
+.DS_Store
+Thumbs.db

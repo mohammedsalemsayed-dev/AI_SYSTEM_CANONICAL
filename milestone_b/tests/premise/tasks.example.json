@@ -1,0 +1,17 @@
+[
+  {
+    "id": "01-fix-off-by-one",
+    "request": "The paginate() helper returns one too many items on the last page. Fix it.",
+    "workspace": "C:/path/to/your/repo-a"
+  },
+  {
+    "id": "02-add-validation",
+    "request": "Add input validation to create_user(): reject empty email and log the rejection. There is a failing test tests/test_users.py::test_rejects_empty_email.",
+    "workspace": "C:/path/to/your/repo-b"
+  },
+  {
+    "id": "03-null-guard",
+    "request": "load_config() crashes when the config file is missing. It should return defaults instead. See tests/test_config.py::test_missing_file_returns_defaults.",
+    "workspace": "C:/path/to/your/repo-c"
+  }
+]
