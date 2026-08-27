@@ -42,7 +42,13 @@ ALLOWED: dict[State, set[State]] = {
         State.FAILED,
         State.CANCELLED,
     },
-    State.VERIFYING: {State.COMPLETED, State.STALLED, State.FAILED, State.CANCELLED},
+    State.VERIFYING: {
+        State.COMPLETED,
+        State.STALLED,
+        State.WAITING_FOR_USER,
+        State.FAILED,
+        State.CANCELLED,
+    },
     State.STALLED: {State.RECOVERING, State.WAITING_FOR_USER, State.FAILED, State.CANCELLED},
     State.RECOVERING: {
         State.EXECUTING,

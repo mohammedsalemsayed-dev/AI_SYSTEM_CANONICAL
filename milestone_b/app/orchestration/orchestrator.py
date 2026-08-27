@@ -34,6 +34,8 @@ from app.services.progress.loop import LoopDetector, action_hash
 from app.services.progress.measure import measure_step
 from app.services.progress.patience import patience_for
 from app.services.progress.service import ProgressService
+from app.services.recovery.checkpoint import build_checkpoint
+from app.services.recovery.reconcile import reconcile
 from app.services.sandbox import SandboxSpec, select_runner
 from app.services.verify.verifier_t0 import extract_pytest_target
 from app.services.workspace.listing import list_workspace
@@ -144,15 +146,84 @@ class Orchestrator:
                 task_id, "waiting for user input", state=State.WAITING_FOR_USER
             )
 
-        self.log.append(
-            task_id,
-            EventKind.ERROR,
-            {"error": f"interrupted in {snap.state}; not auto-resumed in the slice"},
-        )
-        self._force_fail(task_id)
-        return self._finish(
-            task_id, f"interrupted in {snap.state}; re-run the request", state=State.FAILED
-        )
+        return self._reconcile_and_resume(task_id)
+
+    def _reconcile_and_resume(self, task_id: str) -> TaskResult:
+        """Interrupted mid-run: inspect the log, decide, act (MILESTONE_D_PLAN §2)."""
+        events = self.log.read(task_id)
+        decision = reconcile(events)
+        self.log.append(task_id, EventKind.RECONCILE, decision.model_dump(mode="json"))
+
+        if decision.decision == "NOOP":
+            return self._result_from_log(task_id)
+
+        if decision.decision in ("ESCALATE", "REPAIR"):
+            q = (
+                "Interrupted with an uncertain external effect — needs manual review."
+                if decision.decision == "ESCALATE"
+                else "Interrupted before it could plan — re-run the request."
+            )
+            self.log.append(
+                task_id,
+                EventKind.CLARIFICATION,
+                ClarificationRequest(
+                    task_id=task_id, questions=[q], why="restart reconciliation"
+                ).model_dump(mode="json"),
+            )
+            self._transition(task_id, State.WAITING_FOR_USER)
+            return self._finish(
+                task_id, f"{decision.decision.lower()}: {decision.detail}",
+                state=State.WAITING_FOR_USER,
+            )
+
+        # RESUME — steer the state machine to EXECUTING, then re-run the pipeline
+        snap = self._snap(task_id)
+        try:
+            if snap.state is State.INTERPRETING:
+                self._transition(task_id, State.PLANNING)
+                self._transition(task_id, State.EXECUTING)
+            elif snap.state in (State.PLANNING, State.RECOVERING):
+                self._transition(task_id, State.EXECUTING)
+            elif snap.state is State.STALLED:
+                self._transition(task_id, State.RECOVERING)
+                self._transition(task_id, State.EXECUTING)
+            elif snap.state is State.VERIFYING:
+                self._transition(task_id, State.WAITING_FOR_USER)
+                # a crash during verify -> let a human decide; safe default
+                self.log.append(
+                    task_id, EventKind.CLARIFICATION,
+                    ClarificationRequest(
+                        task_id=task_id,
+                        questions=["Interrupted during verification — re-verify?"],
+                        why="restart reconciliation",
+                    ).model_dump(mode="json"),
+                )
+                return self._finish(
+                    task_id, "interrupted during verify", state=State.WAITING_FOR_USER
+                )
+            # EXECUTING: already there
+
+            request = next(
+                e.payload for e in events if e.kind == EventKind.REQUEST
+            )
+            plan = next(
+                Plan.model_validate(e.payload)
+                for e in reversed(events)
+                if e.kind == EventKind.PLAN
+            )
+            contract = next(
+                TaskContract.model_validate(e.payload)
+                for e in reversed(events)
+                if e.kind == EventKind.CONTRACT
+            )
+            return self._execute_verify_settle(
+                task_id, contract, plan, request["workspace_path"],
+                approved_steps=snap.approved_steps,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.log.append(task_id, EventKind.ERROR, {"error": repr(exc)})
+            self._force_fail(task_id)
+            return self._finish(task_id, f"resume error: {exc!r}", state=State.FAILED)
 
     # ------------------------------------------------------------------ #
     def _drive(
@@ -573,12 +644,20 @@ class Orchestrator:
                 return e.payload.get("step_id", "")
         return ""
 
+    _CHECKPOINT_STATES = {State.EXECUTING, State.VERIFYING, State.STALLED, State.RECOVERING}
+
     def _transition(self, task_id: str, target: State) -> None:
         snap = self._snap(task_id)
         ok, reason = transition_ok(snap.state, target, snap)
         if not ok:
             raise TransitionError(f"{snap.state} -> {target}: {reason}")
         self.log.append(task_id, EventKind.STATE, {"state": target})
+        if target in self._CHECKPOINT_STATES:
+            self.log.append(
+                task_id,
+                EventKind.CHECKPOINT,
+                build_checkpoint(self.log.read(task_id)).model_dump(mode="json"),
+            )
 
     def _force_fail(self, task_id: str) -> None:
         snap = self._snap(task_id)

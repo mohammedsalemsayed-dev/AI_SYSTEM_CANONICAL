@@ -97,3 +97,24 @@ Pending: the Tier-A sandbox is coded (`DockerSandbox`, arg-verified) but has not
 container — needs Docker Desktop installed, `slice-sandbox:pytest` built, and the
 `--selftest` passing. Until then a dev-only non-isolating subprocess fallback is used and
 refuses runs marked `allow_non_isolated=False`.
+
+## Milestone D — recovery and progress (`milestone_b/`, days 1–13)
+
+180 tests green. See `milestone_b/MILESTONE_D_NOTES.md`.
+
+Now real (slice scope):
+- deterministic meaningful-progress scoring (six hard signals; novel-motion guard);
+- structural loop detection (repeated action / error / diff-thrash; progress clears history);
+- per-task_class patience;
+- the escalation ladder (inspect / change_strategy / ask_user real; critic / research /
+  stronger_model stubbed to E and G);
+- multi-step `_execute` with per-step T0 measurement and ladder hand-off;
+- task budget (`wall_clock_s` / `steps` / cost) with 80% soft event and 100% pause;
+- checkpoints, idempotency-key tracking;
+- restart reconciliation — `reconcile()` → RESUME / REPAIR / ESCALATE / NOOP, wired into
+  `resume()` (replaces the old "interrupted → FAIL"); RESUME steers the state machine back to
+  EXECUTING and re-runs, workspace untouched.
+
+Stubbed: ladder rungs critic/research/stronger_model; coverage/lint/type-error signals
+(defined, unpopulated); REPAIR escalates rather than auto-re-interpreting; cost dimension
+unmetered on the subscription path.

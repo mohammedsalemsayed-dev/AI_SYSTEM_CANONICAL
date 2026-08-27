@@ -43,7 +43,20 @@ See [MILESTONE_C_NOTES.md](MILESTONE_C_NOTES.md) for what is real vs. pending.
 | 13–14 | Security gate: injection corpus + traversal battery + objective-preservation + no-network | **done** |
 | 15 | Wire-up, status update, notes | **done** |
 
-133 tests green (`python -m pytest`): 87 unit, 18 integration, 28 security.
+### Milestone D ([../MILESTONE_D_PLAN.md](../MILESTONE_D_PLAN.md)) — recovery and progress
+
+See [MILESTONE_D_NOTES.md](MILESTONE_D_NOTES.md). All 13 days done.
+
+| Days | Deliverable | State |
+|---|---|---|
+| 1–2 | meaningful-progress scoring (6 hard signals, novel-motion guard) | **done** |
+| 3–4 | structural loop detection (action / error / diff-thrash) | **done** |
+| 5–7 | patience, per-step measurement, multi-step `_execute`, escalation ladder | **done** |
+| 8 | task budget (wall-clock / steps / cost; 80% soft, 100% pause) | **done** |
+| 9–12 | checkpoints, idempotency, restart reconciliation (RESUME/REPAIR/ESCALATE/NOOP) in `resume()` | **done** |
+| 13 | wire-up, checkpoint emission, status + notes | **done** |
+
+180 tests green (`python -m pytest`): 128 unit, 24 integration, 28 security.
 Sandbox setup: `docker build -t slice-sandbox:pytest app/services/sandbox/images/pytest-runner`
 
 ## Day 10 handoff
