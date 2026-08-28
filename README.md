@@ -41,9 +41,10 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 | **Q** Fault injection & recovery hardening | `app/services/faults/` wrappers (raise real backend exceptions) + a hard-kill log hook; `tests/fault/` 20 cases + a matrix runner (`FAULT_FINDINGS.md`, 14/14) proving safe-terminal / workspace-untouched / clean-`reconcile()` under 13 induced failure modes; forced the `EgressBroker → EgressError` fix | **built** |
 | **R** Telemetry & target-machine calibration | live `HardwareMonitor` reading real RAM/CPU/disk + `nvidia-smi` GPU/VRAM (stdlib + `ctypes`, never raises); one-time `calibrate()` → `HardwareProfile` persisted to system memory; the profile scales the wall-clock budget; hardware sampling now runs every task independent of routing | **built** |
 | **S** Tool adapter framework (§5-C / §10.2 spine) | one `ToolAdapter` Protocol + `ToolRegistry` over the scattered §10.2 tool packages; `manifest_block()` injected at planning + `ToolDispatcher` routing every op through the **existing** Policy Engine + caller `CapabilityGrant` (no new gate); git / fs / net(egress) / engine adapters; manifest `output_trust` stamped on the result so `retrieved_web` is never laundered; a tainted side-effecting op is denied by the existing rule | **built** |
-| **T** Tool-use execution | `ShellToolAdapter` (`shell.exec` through the `SandboxRunner` seam, `tool_output` trust) + `ToolLoop` — the model picks one JSON `{op,args}` per turn, each dispatched through the S spine (= existing Policy Engine + grant), bounded by `max_iters` + a parse budget, deterministic; `ops` is now a first-class flow (`_run_tool_task` on a workspace copy, `TOOL_LOOP` event, `tool_output` transcript artifact, `T0` pass record); a policy-denied op is a transcript turn, not a stop; a tainted context can't run a side-effecting op. Routing the Builder through the loop is the next step | **built** |
+| **T** Tool-use execution | `ShellToolAdapter` (`shell.exec` through the `SandboxRunner` seam, `tool_output` trust) + `ToolLoop` — the model picks one JSON `{op,args}` per turn, each dispatched through the S spine (= existing Policy Engine + grant), bounded by `max_iters` + a parse budget, deterministic; `ops` is now a first-class flow (`_run_tool_task` on a workspace copy, `TOOL_LOOP` event, `tool_output` transcript artifact, `T0` pass record); a policy-denied op is a transcript turn, not a stop; a tainted context can't run a side-effecting op | **built** |
+| **U** Loop detection for the tool loop | D's `LoopDetector` wired per turn into `ToolLoop` — a repeated no-progress op trips `repeated_action` / `repeated_error` and the loop stops early with `loop_risk`; `_run_tool_task` escalates that to `WAITING_FOR_USER` with a `ClarificationRequest` (mirrors the `_execute` stalled-escalation path) instead of burning the iteration cap and failing silently; a `PROGRESS` summary event; `detect_loops` opt-out; deterministic | **built** |
 
-**458 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION, behind one §5-C tool-dispatch spine with a bounded model-driven tool-use loop.**
+**463 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION, behind one §5-C tool-dispatch spine with a bounded, loop-guarded model-driven tool-use loop.**
 
 ### Needs an external resource (built, not run here)
 
@@ -60,7 +61,7 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 
 ```bash
 cd milestone_b
-python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 458 green
+python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 463 green
 python -m app.cli.demo                                                          # offline end-to-end
 python -m app.ui.run_ui --db slice.db --port 8770                               # desktop shell -> http://127.0.0.1:8770
 ```

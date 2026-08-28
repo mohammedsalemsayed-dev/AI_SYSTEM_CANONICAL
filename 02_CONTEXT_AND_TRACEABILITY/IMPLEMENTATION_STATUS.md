@@ -39,7 +39,8 @@ Built since the original scaffold (now FOUNDATION — see the per-milestone sect
 - document/presentation pipelines (M — Markdown/HTML; DOCX/PPTX/PDF are `Renderer` stubs);
 - event streaming (H — SSE; raw WebSocket not required by the read-model design);
 - tool adapter ecosystem (S — the §5-C dispatch spine; T — a `shell` adapter + a bounded
-  model-driven tool-use loop for `ops` tasks; a broad tool catalogue is still additive).
+  model-driven tool-use loop for `ops` tasks; U — D's loop detector wired into that loop;
+  a broad tool catalogue is still additive).
 
 Still requiring real implementation (needs external infrastructure or a paid resource):
 - persistent PostgreSQL models/migrations (the `EventLog` is the seam; SQLite today);
@@ -608,3 +609,32 @@ Now real (slice scope):
 Deferred: routing the Builder (`code_edit_*`) through the loop; parallel / batched tool
 turns; native tool-use blocks in place of JSON turns; per-op retry / self-repair;
 adapters beyond `shell`; streaming a long `shell.exec`.
+
+## Milestone U — loop detection for the tool-use loop (`milestone_b/`, days 1–8)
+
+463 tests green. All 8 days built. The Milestone T tool-use loop now carries the §14.4
+structural progress guard that `_execute` has had since Milestone D. See
+`milestone_b/MILESTONE_U_NOTES.md`.
+
+Now real (slice scope):
+- **Detector wiring** — `ToolLoop(detect_loops=True, loop_detector=None)`: a fresh
+  `LoopDetector` per `run()` + an `_ok_hashes` set. `action_hash` / `normalize_error` /
+  `LoopDetector` imported unchanged from `app.services.progress.loop`.
+- **Per-turn record** — `made_progress = result.ok and action_hash(op,"",args) not in ok_hashes`;
+  `detector.record(...)` each dispatched turn. A new op that succeeds clears the history
+  (D's false-positive guard); a repeated failing op accumulates `repeated_action` +
+  `repeated_error`. `report.flags` attach to the `result` transcript turn.
+- **Early stop** — `report.loop_risk` → a `{"kind":"loop_risk"}` turn and
+  `ToolLoopResult(loop_risk=True, loop_flags=[...])` **before** `max_iters`.
+- **Escalation** — `orchestrator._run_tool_task`: `loop_risk` → a `CLARIFICATION` +
+  `WAITING_FOR_USER` (mirrors the `_execute` `StalledEscalation` path) — asks the user, never
+  silently retries. Iteration-cap / parse-budget still → `FAILED`.
+- **Observability** — one `PROGRESS` summary event per task
+  (`classification: LOOP_RISK | done | incomplete`); `TOOL_LOOP` gains `loop_risk` +
+  `loop_flags`.
+- **Opt-out** — `detect_loops=False` restores the exact Milestone T iteration-cap behaviour;
+  `max_iters` still bounds the loop regardless.
+
+Deferred: an escalation *ladder* for the tool loop (stronger model / critic before the user);
+`ProgressService` patience / `STALLED` classification for tool turns; threshold tuning from
+real transcripts.

@@ -1742,6 +1742,7 @@ class Orchestrator:
             task_id, EventKind.TOOL_LOOP,
             {"objective": objective[:400], "iterations": result.iterations,
              "ok": result.ok, "done": result.done, "denials": result.denials,
+             "loop_risk": result.loop_risk, "loop_flags": result.loop_flags,
              "summary": result.summary[:400], "turns": len(result.transcript)},
         )
         import json as _json
@@ -1759,6 +1760,15 @@ class Orchestrator:
             self.log.append(task_id, EventKind.ARTIFACT, art)
 
         calls = sum(1 for t in result.transcript if t.get("kind") == "result")
+        distinct = len({(t["op"], t["output_excerpt"]) for t in result.transcript
+                        if t.get("kind") == "result"})
+        self.log.append(
+            task_id, EventKind.PROGRESS,
+            {"phase": "tool_loop", "turns": len(result.transcript), "ok_calls": calls,
+             "repeats": max(0, calls - distinct), "loop_flags": result.loop_flags,
+             "classification": "LOOP_RISK" if result.loop_risk else
+             ("done" if result.done else "incomplete")},
+        )
         self.log.append(
             task_id, EventKind.OBSERVATION,
             Observation(task_id=task_id, step_id=step.id,
@@ -1768,6 +1778,29 @@ class Orchestrator:
                         artifact_ref=self._last_store_id(task_id) or "",
                         error="" if result.ok else result.summary).model_dump(mode="json"),
         )
+
+        if result.loop_risk:
+            # a repeating, no-progress loop is an escalation, not a silent failure
+            # (§1) — mirror the _execute StalledEscalation path.
+            self.log.append(
+                task_id, EventKind.CLARIFICATION,
+                ClarificationRequest(
+                    task_id=task_id,
+                    questions=[
+                        "The tool loop is repeating without progress "
+                        f"({', '.join(result.loop_flags)}). How should it proceed?"
+                    ],
+                    why="tool loop is looping without progress",
+                ),
+            )
+            self._transition(task_id, State.WAITING_FOR_USER)
+            return self._finish(
+                task_id,
+                f"tool loop looping ({', '.join(result.loop_flags)}) after "
+                f"{result.iterations} iteration(s)",
+                state=State.WAITING_FOR_USER,
+                artifact_ref=self._last_store_id(task_id) or None,
+            )
 
         if not result.ok:
             self._transition(task_id, State.FAILED)

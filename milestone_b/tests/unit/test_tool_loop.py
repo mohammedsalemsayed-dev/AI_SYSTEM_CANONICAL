@@ -59,8 +59,9 @@ def test_two_ops_then_done(reg: ToolRegistry, ws: str) -> None:
 
 
 def test_no_done_hits_iteration_cap(reg: ToolRegistry, ws: str) -> None:
+    # detection off -> the blunt iteration cap is the only bound (Milestone T)
     llm = ScriptedLLM(lambda s, p: json.dumps({"op": "fs.list", "args": {}}))
-    loop = ToolLoop(ToolDispatcher(reg, PolicyEngine()), llm, max_iters=4)
+    loop = ToolLoop(ToolDispatcher(reg, PolicyEngine()), llm, max_iters=4, detect_loops=False)
     r = loop.run("loop forever", _ctx(ws, ["fs.read"]), reg.manifest_block())
     assert not r.ok and not r.done and r.iterations == 4 and r.summary == "iteration cap"
 
@@ -94,6 +95,44 @@ def test_transcript_is_deterministic(reg: ToolRegistry, ws: str) -> None:
     a = ToolLoop(d, ScriptedLLM(list(script))).run("x", _ctx(ws, ["fs.read"]), reg.manifest_block())
     b = ToolLoop(d, ScriptedLLM(list(script))).run("x", _ctx(ws, ["fs.read"]), reg.manifest_block())
     assert a.transcript == b.transcript and a.summary == b.summary
+
+
+# --- Milestone U: structural loop detection --------------------- #
+def test_repeated_failing_op_is_caught_as_loop_risk(reg: ToolRegistry, ws: str) -> None:
+    # the model keeps trying to read a file that does not exist
+    llm = ScriptedLLM(lambda s, p: json.dumps({"op": "fs.read", "args": {"path": "nope.txt"}}))
+    loop = ToolLoop(ToolDispatcher(reg, PolicyEngine()), llm, max_iters=8)
+    r = loop.run("read the missing file", _ctx(ws, ["fs.read"]), reg.manifest_block())
+    assert r.loop_risk and not r.ok and not r.done
+    assert r.iterations < 8
+    assert {"repeated_action", "repeated_error"} & set(r.loop_flags)
+    assert r.transcript[-1]["kind"] == "loop_risk"
+
+
+def test_progress_each_turn_never_trips(reg: ToolRegistry, ws: str) -> None:
+    # a distinct successful op every turn -> the detector history keeps clearing
+    (Path(ws) / "c.txt").write_text("gamma\n", encoding="utf-8", newline="\n")
+    script = [json.dumps({"op": "fs.read", "args": {"path": f}}) for f in ("a.txt", "b.txt", "c.txt")]
+    script.append(json.dumps({"done": True, "summary": "read three files"}))
+    loop = ToolLoop(ToolDispatcher(reg, PolicyEngine()), ScriptedLLM(script), max_iters=8)
+    r = loop.run("read every file", _ctx(ws, ["fs.read"]), reg.manifest_block())
+    assert r.ok and r.done and not r.loop_risk and r.loop_flags == []
+
+
+def test_detection_can_be_disabled(reg: ToolRegistry, ws: str) -> None:
+    llm = ScriptedLLM(lambda s, p: json.dumps({"op": "fs.read", "args": {"path": "nope.txt"}}))
+    off = ToolLoop(ToolDispatcher(reg, PolicyEngine()), llm, max_iters=5, detect_loops=False)
+    r = off.run("read the missing file", _ctx(ws, ["fs.read"]), reg.manifest_block())
+    assert not r.loop_risk and r.iterations == 5 and r.summary == "iteration cap"
+
+
+def test_loop_risk_outcome_is_deterministic(reg: ToolRegistry, ws: str) -> None:
+    def _mk() -> ToolLoop:
+        llm = ScriptedLLM(lambda s, p: json.dumps({"op": "fs.read", "args": {"path": "x.txt"}}))
+        return ToolLoop(ToolDispatcher(reg, PolicyEngine()), llm, max_iters=8)
+    a = _mk().run("x", _ctx(ws, ["fs.read"]), reg.manifest_block())
+    b = _mk().run("x", _ctx(ws, ["fs.read"]), reg.manifest_block())
+    assert a.transcript == b.transcript and a.loop_flags == b.loop_flags and a.summary == b.summary
 
 
 def test_tainted_context_cannot_run_a_side_effecting_op(reg: ToolRegistry, ws: str) -> None:

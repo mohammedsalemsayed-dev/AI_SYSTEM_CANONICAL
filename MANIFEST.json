@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "27f620799f5186ccaa375e04015a26fb2fe47d4244dad2a7779fe41073dd4313",
+      "sha256": "51613c129689fa959b718465fbc0cd2b3b103ee5664177a8eb31a18dfbd8c834",
       "bytes": 8057
     },
     {
@@ -34,12 +34,12 @@
     },
     {
       "path": "02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md",
-      "sha256": "343a9844703af55cb208d69a2dfc7d7211d4387557dae56a3fc4ab67c92ac90d",
+      "sha256": "212fe4439057ea43d565ba6d6656f9050b6c4033cf12c7cadca0cbf16f5f8d0f",
       "bytes": 34159
     },
     {
       "path": "02_CONTEXT_AND_TRACEABILITY/REQUIREMENT_TRACEABILITY.md",
-      "sha256": "f0d1ccd2bca62e64c5ecca2ecf808a2fbc655e1b3af70e2ec35dcbb0713c8898",
+      "sha256": "c1232c5c89fd556d74fb6b92ddfee6b484815aed1f7d4f7a7106551bd31ed60b",
       "bytes": 14727
     },
     {

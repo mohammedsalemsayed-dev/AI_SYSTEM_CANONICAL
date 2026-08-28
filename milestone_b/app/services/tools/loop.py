@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.llm.parse import parse_json_object
+from app.services.progress.loop import LoopDetector, action_hash, normalize_error
 from app.services.tools.base import DispatchContext
 from app.services.tools.dispatch import ToolDispatcher
 
@@ -42,6 +43,9 @@ class ToolLoopResult:
     # the non-ALLOW PolicyDecision objects the loop saw, in order — the caller
     # logs these as POLICY_DECISION events (the loop itself does no logging).
     decisions: list[Any] = field(default_factory=list)
+    # Milestone U — structural loop detection (D's LoopDetector)
+    loop_risk: bool = False
+    loop_flags: list[str] = field(default_factory=list)
 
 
 class ToolLoop:
@@ -52,11 +56,15 @@ class ToolLoop:
         *,
         max_iters: int = 6,
         parse_budget: int = 2,
+        detect_loops: bool = True,
+        loop_detector: LoopDetector | None = None,
     ) -> None:
         self.dispatcher = dispatcher
         self.llm = llm
         self.max_iters = max_iters
         self.parse_budget = parse_budget
+        self.detect_loops = detect_loops
+        self._detector_arg = loop_detector
 
     def run(
         self, objective: str, ctx: DispatchContext, manifest_block: str
@@ -65,6 +73,9 @@ class ToolLoop:
         decisions: list[Any] = []
         denials = 0
         parse_left = self.parse_budget
+        # a fresh detector per run() — the loop holds no state between calls
+        detector = self._detector_arg or LoopDetector()
+        ok_hashes: set[str] = set()
 
         for it in range(1, self.max_iters + 1):
             reply = self._ask(objective, manifest_block, transcript)
@@ -98,11 +109,35 @@ class ToolLoop:
             if decision is not None and decision.decision != "ALLOW":
                 denials += 1
                 decisions.append(decision)
-            transcript.append({
+            excerpt = "" if result.output is None else str(result.output)[:_EXCERPT]
+            res_turn = {
                 "kind": "result", "op": op, "ok": result.ok, "trust": result.trust,
-                "output_excerpt": ("" if result.output is None else str(result.output)[:_EXCERPT]),
-                "error": result.error[:_EXCERPT],
-            })
+                "output_excerpt": excerpt, "error": result.error[:_EXCERPT],
+            }
+            transcript.append(res_turn)
+
+            # structural loop detection (D §14.4): a turn that ran a *new* op
+            # successfully is progress and clears the history; a repeated failing
+            # op accumulates repeated_action / repeated_error.
+            ah = action_hash(op, "", args)
+            made_progress = result.ok and ah not in ok_hashes
+            if made_progress:
+                ok_hashes.add(ah)
+            report = detector.record(
+                act_hash=ah,
+                error_signature=None if result.ok else normalize_error(result.error or op),
+                diff_text=excerpt,
+                made_progress=made_progress,
+            )
+            if report.flags:
+                res_turn["loop_flags"] = list(report.flags)
+            if self.detect_loops and report.loop_risk:
+                transcript.append({"kind": "loop_risk", "flags": list(report.flags)})
+                return ToolLoopResult(
+                    False, False, it, "loop risk: " + ",".join(report.flags),
+                    transcript, denials, decisions,
+                    loop_risk=True, loop_flags=list(report.flags),
+                )
 
         return ToolLoopResult(False, False, self.max_iters, "iteration cap",
                               transcript, denials, decisions)
@@ -134,6 +169,8 @@ class ToolLoop:
                 lines.append(f"- error: {t['error']}")
             elif k == "done":
                 lines.append(f"- done: {t['summary']}")
+            elif k == "loop_risk":
+                lines.append(f"- loop risk: {', '.join(t['flags'])}")
         return "\n".join(lines) + "\n"
 
 

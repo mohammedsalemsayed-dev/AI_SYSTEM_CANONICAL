@@ -98,6 +98,47 @@ def test_denied_side_effecting_op_still_completes_workspace_untouched(tmp_path: 
     assert (ws / "notes.txt").read_text() == "data\n"
 
 
+def test_looping_ops_task_escalates_to_waiting_for_user(tmp_path: Path) -> None:
+    """A tool loop that repeats a failing op is caught by the D loop detector and
+    escalated to the user (Milestone U), not left to fail on the iteration cap."""
+    ws = tmp_path / "proj"
+    ws.mkdir()
+    (ws / "real.txt").write_text("x\n", encoding="utf-8", newline="\n")
+
+    log = EventLog()
+    # every turn: read a file that isn't there -> identical failure, forever
+    orch = build_orchestrator(log, llm_replies=[_ops_contract()], builder_edits={})
+    reg = _registry()
+    orch.tools = reg
+    orch.artifacts = ArtifactStore()
+
+    class _Repeat:
+        provider = "fake"
+        model = "repeat-1"
+
+        def complete(self, *, system: str, prompt: str):
+            from app.llm.base import LLMResponse
+            return LLMResponse(text=json.dumps({"op": "fs.read", "args": {"path": "ghost.txt"}}),
+                               input_tokens=1, output_tokens=1, latency_s=0.0,
+                               provider="fake", model="repeat-1")
+
+    orch.tool_loop = lambda: ToolLoop(ToolDispatcher(reg, orch.policy), _Repeat(), max_iters=10)
+
+    r = orch.run("keep reading a missing file", str(ws))
+    assert r.state == "WAITING_FOR_USER"
+    ev = log.read(r.task_id)
+    loop_ev = [e for e in ev if e.kind == EventKind.TOOL_LOOP][0]
+    assert loop_ev.payload["loop_risk"] is True and loop_ev.payload["loop_flags"]
+    assert loop_ev.payload["iterations"] < 10
+    clar = [e for e in ev if e.kind == EventKind.CLARIFICATION]
+    assert clar and "repeating without progress" in clar[0].payload["questions"][0]
+    assert [e for e in ev if e.kind == EventKind.PROGRESS
+            and e.payload.get("classification") == "LOOP_RISK"]
+    # the transcript is still captured
+    art = [e for e in ev if e.kind == EventKind.ARTIFACT]
+    assert art and art[-1].payload["artifact_kind"] == "tool_transcript"
+
+
 def test_ops_unset_tool_loop_uses_the_normal_pipeline(tmp_path: Path) -> None:
     """`ops` with no tool_loop wired -> the contract still flows through the
     ordinary plan->build path (byte-identical to Milestone S)."""
