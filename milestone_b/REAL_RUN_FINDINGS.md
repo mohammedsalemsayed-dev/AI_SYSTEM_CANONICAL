@@ -42,13 +42,33 @@ answer. **The premise holds.**
 This is the safety machinery working correctly on a real run: no false
 `COMPLETED`, no infinite spin, a coherent escalation with a clarification question.
 
+## Run 3 — write-back (SLICE_LLM=agent_sdk, `run_task --apply`)
+
+Same task. `COMPLETED, verified=True` → `apply_task_result` wrote the verified
+diff back to the real `strutil.py` → `3 passed` when the tests are run directly.
+The system now *fixes* code, not just *validates a proposed fix*.
+
+## Run 4 — dual local model (`--interpreter-llm local:llama3.1:8b --planner-llm local:llama3.1:8b`, cloud Builder, `--apply`)
+
+| Stage | Result |
+|---|---|
+| Interpreter (`llama3.1:8b`, GPU) | clean contract, 442 in / 135 out, 6.8 s |
+| Planner (`llama3.1:8b`) | **2 clean steps**: (1) modify `slugify()` `[fs.write]`, (2) run pytest `[shell.run]` — **no "edit the test" step** (the guarded Planner prompt held) |
+| Execution | both steps `HEALTHY_PROGRESS` — **no `LOOP_RISK`**, unlike `qwen2.5-coder:7b` |
+| VerifierT0 | pass (Docker) → **COMPLETED, verified=True** → applied to `strutil.py` → `3 passed` |
+
+`llama3.1:8b` is a materially better local Planner/Interpreter for this system
+than `qwen2.5-coder:7b`. The raw-prompt worry ("edit the test file") did **not**
+happen through the real `Planner` class. Model allocation: `llama3.1:8b` for
+`local-small` / `local-reasoner` (interpret / plan / reason);
+`qwen2.5-coder:7b` for `local-coder` (code_edit_local / debug).
+
 ## Bugs / gaps surfaced
 
-1. **The verified fix is never written back.** `app/cli/run_task.py` proposes and
-   verifies a diff on throwaway workspace copies; the user's real file is left
-   untouched. The CLI can validate that a fix works but cannot apply one — there
-   is no "accept the verified diff" step. **Status: open** (design decision — a
-   dry-run CLI vs. an apply step).
+1. **The verified fix is never written back.** **FIXED** — `app/services/build/apply.py`
+   `apply_task_result()` + `run_task --apply` (Runs 3 & 4). The Orchestrator still
+   never touches the user's tree; applying is a separate, verification-gated,
+   `APPLIED`-logged step.
 
 2. **Token accounting on the `agent_sdk` path.** `claude_agent_sdk` 0.2.145
    returns `ResultMessage.usage` as a **dict**, not an object; `AgentSDKLLM` used
@@ -58,13 +78,16 @@ This is the safety machinery working correctly on a real run: no false
    with prompt caching and are now summed, but the SDK's reporting of the
    pre-cache prompt size is still approximate.
 
-3. **`qwen2.5-coder:7b` is a weak Planner.** Fine as an Interpreter (structured
-   extraction) and would be fine for `qa_explain` / `ops`. As the multi-step
-   Planner it emits conditional pseudo-steps that trip the (correctly
-   functioning) stall detector. **Recommendation:** keep the local tier for
-   interpret / `qa_explain` / `ops`; use a cloud model for the Planner and the
-   Builder, exactly as the §7.2 routing priors already suggest
-   (`quality_prior` 0.6 local-coder vs 0.82 agent_sdk).
+3. **`qwen2.5-coder:7b` is a weak Planner.** Emits conditional pseudo-steps that
+   trip the (correctly functioning) stall detector. **Resolved by model choice:**
+   `llama3.1:8b` plans cleanly (Run 4). Keep `qwen2.5-coder:7b` for
+   `code_edit_local` / `debug`, `llama3.1:8b` for interpret / plan / reason.
+
+4. **`.gitignore` hid the Builder package.** Line 8 `build/` also matched
+   `milestone_b/app/services/build/` → `base.py` / `fake.py` / `agent_sdk.py` /
+   `workspace_copy.py` were never committed in any milestone; a fresh clone would
+   fail at import. **FIXED** (`/build/` anchored; files recovered — commit
+   `6fbfc94`).
 
 ## What was wired
 
