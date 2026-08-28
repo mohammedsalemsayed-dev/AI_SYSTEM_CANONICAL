@@ -38,7 +38,7 @@ _OUT = Path("LOCAL_FIRST_BENCH.md")
 _LOCAL = "local:qwen3:8b"
 
 
-def _run_one(task: dict) -> dict:
+def _run_one(task: dict, full: bool = False) -> dict:
     ws = str(Path(task["workspace"]).resolve())
     log = EventLog()
     interp = get_llm(_LOCAL)
@@ -47,6 +47,10 @@ def _run_one(task: dict) -> dict:
         get_builder(_LOCAL), VerifierT0(), PolicyEngine(),
     )
     orch.fallback_builder = get_builder("agent_sdk")
+    if full:
+        from app.cli.full_stack import wire_full_stack
+
+        wire_full_stack(orch, verbose=False)
 
     t0 = time.time()
     try:
@@ -70,6 +74,8 @@ def _run_one(task: dict) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
+    full = "--full" in argv
+    argv = [a for a in argv if a != "--full"]
     tasks = json.loads(Path("tests/premise/tasks.seeded.json").read_text("utf-8"))
     tasks = [t for t in tasks if Path(t["workspace"]).is_dir()]
     if argv:
@@ -81,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = []
     for t in tasks:
-        r = _run_one(t)
+        r = _run_one(t, full=full)
         rows.append(r)
         print(f"  {r['id']:26} {r['bucket']:10} state={r['state']:14} "
               f"verds={r['verds']} {r['secs']}s")
@@ -90,10 +96,12 @@ def main(argv: list[str] | None = None) -> int:
     loc = sum(r["bucket"] == "local" for r in rows)
     esc = sum(r["bucket"] == "escalated" for r in rows)
     fail = sum(r["bucket"] == "failed" for r in rows)
+    title = "# Premise run — local-first with cloud escalation" + (" (FULL stack)" if full else "")
     lines = [
-        "# Premise run — local-first with cloud escalation", "",
+        title, "",
         f"Full pipeline per task: Interpreter + Planner + Builder = `{_LOCAL}`; "
-        "Verifier = T0 in Docker; fallback = `agent_sdk` (one retry on T0 fail).", "",
+        "Verifier = T0 in Docker; fallback = `agent_sdk` (one retry on T0 fail)"
+        + ("; plus Router + Critic + T2 verifier + memory/experience." if full else "."), "",
         f"- **solved on-device (local only): {loc}/{n}**",
         f"- solved after escalation to cloud: {esc}/{n}",
         f"- failed (neither): {fail}/{n}",
