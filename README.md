@@ -33,8 +33,9 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 | **H** Tauri packaging | Tauri v2 native shell (Rust sidecar supervision) + PyInstaller `nexus-server` sidecar + one-command build | **scaffolded** — not `cargo build`-verified here; needs a Rust + PyInstaller build host |
 | **J** Repo intelligence & Git adapter (§10.2 domain 1) | deterministic Git adapter, `ast` symbol index, import dependency graph, blast-radius `ImpactReport` (dependent modules + affected tests + risk flags), breadth advisory; impact-selected tests widen T0 | **built** |
 | **K** Research pipeline & evidence graph (§10.2 domain 2) | question decomposition, per-sub-question Researcher, evidence graph (support/agree/contradict edges), bounded cross-check, claims-only synthesis → cited `ResearchAnswer` with mandatory uncertainty; `research_web` is a first-class flow; hostile-source injection scan | **built** |
+| **L** RAG / knowledge base (§10.2 domain 3) | `KnowledgeBase` ingest + heading-aware chunking + BM25 lexical retrieval behind a `Retriever` protocol; claims-only KB answer at `doc_input` trust; `doc_analysis` is a first-class flow; research pipeline can blend library + web. A real embedding/RAG framework is the integration point behind `Retriever` (§16) | **built** |
 
-**344 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`).
+**357 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`).
 
 ### Needs an external resource (built, not run here)
 

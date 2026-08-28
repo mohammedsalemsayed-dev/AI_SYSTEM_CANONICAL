@@ -352,7 +352,36 @@ Now real (slice scope):
   instructions … exfiltrate" page is flagged and changes nothing (integration-asserted).
 - **Event kinds** — `RESEARCH`, `SYNTHESIS`.
 
-Deferred: real live egress fetch; embedding retrieval + a persistent knowledge base (→ RAG,
-domain 3); HTML/PDF readability extraction; multi-hop provenance; learned source reputation.
-Next §10.2 domains: RAG / knowledge base (needs this pipeline), DOCX/PPTX authoring, engine
+Deferred: real live egress fetch; HTML/PDF readability extraction; multi-hop provenance;
+learned source reputation.
+
+## Milestone L — RAG / knowledge base (`milestone_b/`, days 1–14)
+
+357 tests green. All 14 days built. Third §10.2 capability domain. See
+`milestone_b/MILESTONE_L_NOTES.md`.
+
+Now real (slice scope):
+- **KnowledgeBase** — `app/services/kb/store.py`: SQLite documents + chunks; `ingest_text` /
+  `ingest_file` / `ingest_dir` (text suffixes only, size + binary guards, sha-idempotent);
+  every ingest runs the injection scan → `document.flags`. The retrieval index is derived
+  (`rebuild_index()` from the chunk table, §11.3).
+- **Chunking** — `kb/chunk.py`: heading-aware sliding window with overlap; deterministic.
+- **Lexical retrieval** — `kb/lexical.py` `LexicalIndex` (Okapi BM25) as the stdlib fallback
+  behind the `kb/retrieve.py` `Retriever` protocol — **a real embedding store / RAG framework
+  slots in here** (§16: "do not build, integrate").
+- **KB answer** — `kb/answer.py`: retrieve → per-chunk claim extraction (delimited
+  `DOCUMENT CONTEXT`) → claims-only `research.synthesize` → `KBAnswer{sections+citations,
+  uncertainty}` at `doc_input` trust; a no-match states the gap.
+- **Research hook** — `ResearchPipeline(kb=)` adds `doc_input` KB sources per sub-question,
+  so an answer blends library + web with per-source trust visible.
+- **Orchestrator** — `orch.kb` opt-in; a `doc_analysis` task runs the KB answer path
+  (`PLANNING`→`EXECUTING`→`KB`+`SYNTHESIS`→`OBSERVATION`→`VERIFYING`→`COMPLETED`); `KBAnswer`
+  as artifact.
+- **§12** — chunk text never reaches a decision prompt; every KB node is `doc_input` trust so
+  it cannot originate a side effect; a planted-directive document is flagged and changes
+  nothing.
+- **Event kind** — `KB`.
+
+Deferred: a real embedding / RAG framework behind `Retriever`; OCR + office-format parsing;
+cross-encoder rerank; incremental re-index. Next §10.2 domains: DOCX/PPTX authoring, engine
 adapters, automated model selection.

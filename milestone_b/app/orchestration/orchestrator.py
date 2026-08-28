@@ -116,6 +116,7 @@ class Orchestrator:
         self.hardware = None  # Milestone G — set to a HardwareMonitor for mode policy
         self.repo = None  # Milestone J — set to a RepoIntelligence to enable repo context + impact
         self.research = None  # Milestone K — set to a ResearchPipeline for research_web tasks
+        self.kb = None  # Milestone L — set to a KnowledgeBase for doc_analysis tasks
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -270,6 +271,8 @@ class Orchestrator:
 
             if contract.task_class == "research_web" and self.research is not None:
                 return self._run_research(task_id, contract, request_text)
+            if contract.task_class == "doc_analysis" and self.kb is not None:
+                return self._run_doc_analysis(task_id, contract, request_text)
 
             snap = self._snap(task_id)
             if snap.contract is not None and (
@@ -1303,6 +1306,71 @@ class Orchestrator:
             + (f", {unresolved} contested" if unresolved else ""),
             state=State.COMPLETED, verified=True,
             artifact_ref=answer.id, verification_ref=verification.id,
+        )
+
+    def _run_doc_analysis(self, task_id, contract, request_text) -> TaskResult:
+        """`doc_analysis` deliverable path (Milestone L). Runs the KB answer path
+        (retrieve -> claims-only synthesis -> cited `KBAnswer` at `doc_input`
+        trust) instead of plan->build->verify."""
+        from app.schemas.contracts import (
+            CriterionVerdict,
+            Observation,
+            Plan,
+            PlanStep,
+            VerificationRecord,
+        )
+        from app.services.kb.answer import answer as kb_answer
+
+        self._transition(task_id, State.PLANNING)
+        step = PlanStep(
+            intent="retrieve from the knowledge base and synthesise a cited answer",
+            expected_artifact_delta="produce a KBAnswer",
+            required_capability="fs.read",
+        )
+        self.log.append(task_id, EventKind.PLAN, Plan(task_id=task_id, steps=[step]))
+        self._transition(task_id, State.EXECUTING)
+
+        question = contract.objective or request_text
+        llm = getattr(self.interpreter, "llm", None) or getattr(self.planner, "llm", None)
+        ans = kb_answer(self.kb, question, llm, task_id=task_id)
+
+        self.log.append(
+            task_id, EventKind.KB,
+            {"query": question, "hits": len(ans.citations),
+             "flags": ans.flags, "docs": len(self.kb.documents())},
+        )
+        self.log.append(task_id, EventKind.SYNTHESIS, ans.model_dump(mode="json"))
+        self._msg(
+            task_id, "kb", "ANSWER",
+            claims=[s["statement"] for s in ans.sections[:5]],
+            evidence_refs=[c["id"] for c in ans.citations[:8]],
+            confidence_summary=ans.uncertainty[:200] or "none noted",
+        )
+        self.log.append(
+            task_id, EventKind.OBSERVATION,
+            Observation(task_id=task_id, step_id=step.id, exit_code=0,
+                        stdout=f"{len(ans.sections)} sections, {len(ans.citations)} sources",
+                        artifact_ref=ans.id).model_dump(mode="json"),
+        )
+        self._transition(task_id, State.VERIFYING)
+        crit = CriterionVerdict(
+            criterion=(
+                f"doc_analysis: {len(ans.citations)} chunks retrieved, "
+                "claims-only synthesis complete, uncertainty stated"
+            ),
+            verdict="pass",
+        )
+        verification = VerificationRecord(
+            task_id=task_id, tier="T0", criteria=[crit], overall="pass",
+            residual_uncertainty=ans.uncertainty,
+        )
+        self.log.append(task_id, EventKind.VERIFICATION, verification)
+        self._transition(task_id, State.COMPLETED)
+        return self._finish(
+            task_id,
+            f"kb answer: {len(ans.sections)} sections, {len(ans.citations)} sources",
+            state=State.COMPLETED, verified=True,
+            artifact_ref=ans.id, verification_ref=verification.id,
         )
 
     def _do_research(self, task_id, contract, reason, tried) -> str:

@@ -497,6 +497,18 @@ class ResearchAnswer(BaseModel):
     ts: float = Field(default_factory=now_ts)
 
 
+class KBAnswer(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("kbans"))
+    task_id: str = ""
+    question: str = ""
+    sections: list[dict[str, Any]] = Field(default_factory=list)   # {statement, citation_ids[]}
+    citations: list[dict[str, Any]] = Field(default_factory=list)  # {id, uri, title, heading}
+    uncertainty: str = ""
+    flags: list[str] = Field(default_factory=list)
+    trust_level: TrustLevelEv = "doc_input"
+    ts: float = Field(default_factory=now_ts)
+
+
 # --------------------------------------------------------------------------- #
 # repo intelligence (Milestone J; DESIGN_TIGHTENING §10.2)
 # --------------------------------------------------------------------------- #
