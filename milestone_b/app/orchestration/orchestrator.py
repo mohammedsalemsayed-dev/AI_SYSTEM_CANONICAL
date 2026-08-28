@@ -109,7 +109,8 @@ class Orchestrator:
         self.verifier_t2 = None  # Milestone E — set to a VerifierT2 to enable the ensemble
         self.researcher = None  # Milestone E — set to a Researcher to enable the ladder rung
         self.role_perf = None  # Milestone E — RolePerformanceStore for shadow metrics
-        self.memory = None  # Milestone F — set to a MemoryStore to enable context + experience
+        self.memory = None  # Milestone F — set to a MemoryStore to enable context
+        self.experience = None  # Milestone F — set to an ExperienceStore
 
     def _step_runner(self):
         if self._runner is None:
@@ -275,6 +276,7 @@ class Orchestrator:
                 )
 
             self._transition(task_id, State.PLANNING)
+            self._experience_advice(task_id, contract)
             plan, prun = self.planner.plan(contract, listing)
             self.log.append(task_id, EventKind.PLAN, plan)
             self.log.append(task_id, EventKind.MODEL_RUN, prun)
@@ -433,6 +435,7 @@ class Orchestrator:
         if verification.overall == "pass":
             self._transition(task_id, State.COMPLETED)
             self._remember_completion(task_id, contract, combined_diff, verification)
+            self._capture_experience(task_id, contract, verification)
             return self._finish(
                 task_id, "completed", state=State.COMPLETED,
                 verified=True, verification_ref=verification.id,
@@ -714,14 +717,8 @@ class Orchestrator:
 
         return build_context(self.memory, request_text, task_class=task_class)
 
-    def _remember_completion(self, task_id, contract, diff, verification) -> None:
-        """Project-memory artifact index on a verified completion. Experience
-        capture (Milestone F days 7-8) hooks here too."""
-        if self.memory is None:
-            return
-        from app.services.memory.store import MemoryRecord
-
-        changed = sorted(
+    def _changed_paths(self, task_id) -> list[str]:
+        return sorted(
             {
                 p
                 for e in self.log.read(task_id)
@@ -729,6 +726,14 @@ class Orchestrator:
                 for p in e.payload.get("changed_paths", [])
             }
         )
+
+    def _remember_completion(self, task_id, contract, diff, verification) -> None:
+        """Project-memory artifact index on a verified completion."""
+        if self.memory is None:
+            return
+        from app.services.memory.store import MemoryRecord
+
+        changed = self._changed_paths(task_id)
         if changed:
             self.memory.put(
                 MemoryRecord(
@@ -738,6 +743,53 @@ class Orchestrator:
                 )
             )
         self.log.append(task_id, EventKind.MEMORY, {"used": "write", "kind": "artifact_index"})
+
+    def _experience_advice(self, task_id, contract) -> None:
+        """Retrieve matching PROMOTED/VALIDATED experiences and pass them to the
+        Planner as an advisory message. The Planner still writes a fresh plan."""
+        if self.experience is None:
+            return
+        from app.services.agents.messages import emit_message
+        from app.services.experience.signature import situation_signature
+
+        sig = situation_signature(contract, tools_used=["builder", "verifier_t0"])
+        matches = self.experience.retrieve(sig)
+        for exp in matches:
+            self.experience.record_use(exp.id, verified=True)  # retrieval == a use
+        if matches:
+            emit_message(
+                self.log, task_id,
+                sender="experience", role="experience", intent="PROPOSAL",
+                claims=[f"a {m.validation_state} strategy for a similar task: {m.strategy}"
+                        for m in matches[:3]],
+                evidence_refs=[m.id for m in matches[:3]],
+                confidence_summary="advisory — the planner still decides",
+            )
+
+    def _capture_experience(self, task_id, contract, verification) -> None:
+        if self.experience is None:
+            return
+        from app.services.experience.signature import situation_signature
+
+        changed = self._changed_paths(task_id)
+
+        plan = next(
+            (Plan.model_validate(e.payload) for e in reversed(self.log.read(task_id))
+             if e.kind == EventKind.PLAN),
+            None,
+        )
+        strategy = " ; ".join(s.intent for s in plan.steps) if plan else contract.objective
+        sig = situation_signature(contract, tools_used=["builder", "verifier_t0"])
+        exp = self.experience.capture(
+            signature=sig, strategy=strategy, actions=list(changed),
+            evidence_refs=[verification.id], success_score=1.0,
+            verify_tier=verification.tier,
+        )
+        if exp is not None:
+            self.log.append(
+                task_id, EventKind.EXPERIENCE,
+                {"id": exp.id, "state": exp.validation_state, "signature": sig},
+            )
 
     def _emit_composition(self, task_id, contract) -> None:
         from app.services.agents.composition import select_roles
