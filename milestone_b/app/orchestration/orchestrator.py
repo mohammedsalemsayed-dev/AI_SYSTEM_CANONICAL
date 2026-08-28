@@ -109,6 +109,7 @@ class Orchestrator:
         self.verifier_t2 = None  # Milestone E — set to a VerifierT2 to enable the ensemble
         self.researcher = None  # Milestone E — set to a Researcher to enable the ladder rung
         self.role_perf = None  # Milestone E — RolePerformanceStore for shadow metrics
+        self.memory = None  # Milestone F — set to a MemoryStore to enable context + experience
 
     def _step_runner(self):
         if self._runner is None:
@@ -237,6 +238,10 @@ class Orchestrator:
         try:
             self._transition(task_id, State.INTERPRETING)
             listing = self.workspace_lister(workspace_path)
+            mem_ctx = self._memory_context(request_text)
+            if mem_ctx:
+                self.log.append(task_id, EventKind.MEMORY, {"used": "context", "chars": len(mem_ctx)})
+                listing = mem_ctx + "\n\n" + listing
 
             contract, run = self.interpreter.compile(task_id, request_text, listing)
             self.log.append(task_id, EventKind.CONTRACT, contract)
@@ -427,6 +432,7 @@ class Orchestrator:
 
         if verification.overall == "pass":
             self._transition(task_id, State.COMPLETED)
+            self._remember_completion(task_id, contract, combined_diff, verification)
             return self._finish(
                 task_id, "completed", state=State.COMPLETED,
                 verified=True, verification_ref=verification.id,
@@ -700,6 +706,38 @@ class Orchestrator:
         from app.services.agents.messages import emit_message
 
         emit_message(self.log, task_id, sender=sender, role=sender, intent=intent, **kw)
+
+    def _memory_context(self, request_text: str, task_class: str | None = None) -> str:
+        if self.memory is None:
+            return ""
+        from app.services.memory.context import build_context
+
+        return build_context(self.memory, request_text, task_class=task_class)
+
+    def _remember_completion(self, task_id, contract, diff, verification) -> None:
+        """Project-memory artifact index on a verified completion. Experience
+        capture (Milestone F days 7-8) hooks here too."""
+        if self.memory is None:
+            return
+        from app.services.memory.store import MemoryRecord
+
+        changed = sorted(
+            {
+                p
+                for e in self.log.read(task_id)
+                if e.kind == EventKind.ARTIFACT
+                for p in e.payload.get("changed_paths", [])
+            }
+        )
+        if changed:
+            self.memory.put(
+                MemoryRecord(
+                    task_id=task_id, tier="project", kind="artifact_index",
+                    scope=contract.task_class,
+                    content=f"{contract.objective} -> touched {', '.join(changed)}",
+                )
+            )
+        self.log.append(task_id, EventKind.MEMORY, {"used": "write", "kind": "artifact_index"})
 
     def _emit_composition(self, task_id, contract) -> None:
         from app.services.agents.composition import select_roles

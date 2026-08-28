@@ -55,6 +55,10 @@ class EventKind:
     ROLE_PERF = "ROLE_PERF"
     EVIDENCE = "EVIDENCE"
     COMPOSITION = "COMPOSITION"
+    # Milestone F — memory and experience
+    MEMORY = "MEMORY"
+    EXPERIENCE = "EXPERIENCE"
+    EXPERIENCE_TRANSITION = "EXPERIENCE_TRANSITION"
 
 
 class Event(BaseModel):

@@ -334,6 +334,43 @@ class EvidenceRecord(BaseModel):
     ts: float = Field(default_factory=now_ts)
 
 
+MemoryTier = Literal["working", "project", "experience", "system"]
+ExperienceState = Literal[
+    "OBSERVED", "CANDIDATE", "VALIDATED", "PROMOTED", "MONITORED", "STALE", "QUARANTINED"
+]
+
+
+class MemoryRecord(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("mem"))
+    task_id: str = ""  # "" for project/system-scoped entries
+    tier: MemoryTier
+    kind: str  # decision | constraint | open_question | artifact_index | note | role_perf
+    content: str
+    scope: str = "global"  # a task_class, a path glob, or "global"
+    trust: TrustLevelEv = "workspace"
+    version: int = 1
+    ts: float = Field(default_factory=now_ts)
+    superseded_by: str | None = None
+
+
+class ExperienceRecord(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("exp"))
+    signature: str  # situation signature (see experience/signature.py)
+    strategy: str
+    actions: list[str] = Field(default_factory=list)
+    outcome: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+    success_score: float = 0.0
+    validation_state: ExperienceState = "OBSERVED"
+    scope: str = "global"
+    version: int = 1
+    promotion_history: list[str] = Field(default_factory=list)
+    monitoring_metrics: dict[str, float] = Field(default_factory=dict)
+    shadow_replay_log: list[dict[str, Any]] = Field(default_factory=list)
+    guardrail_result: float | None = None
+    ts: float = Field(default_factory=now_ts)
+
+
 # --------------------------------------------------------------------------- #
 # contract gate (leave INTERPRETING)
 # --------------------------------------------------------------------------- #
