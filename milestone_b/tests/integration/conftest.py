@@ -11,6 +11,7 @@ from app.services.build.fake import ScriptedBuilder
 from app.services.interpret.interpreter import Interpreter
 from app.services.plan.planner import Planner
 from app.services.policy.engine import PolicyEngine
+from app.services.sandbox.subprocess_backend import SubprocessSandbox
 from app.services.verify.verifier_t0 import VerifierT0
 
 
@@ -61,11 +62,15 @@ def build_orchestrator(
     policy=None,
 ) -> Orchestrator:
     llm = ScriptedLLM(llm_replies)
+    # integration tests run pytest through the fast subprocess backend; the real
+    # Docker isolation path is asserted in tests/security/test_security_gate.py
+    runner = SubprocessSandbox()
     return Orchestrator(
         log,
         Interpreter(llm),
         Planner(llm),
         ScriptedBuilder(builder_edits),
-        VerifierT0(),
+        VerifierT0(runner=runner),
         policy or PolicyEngine(),
+        runner=runner,
     )

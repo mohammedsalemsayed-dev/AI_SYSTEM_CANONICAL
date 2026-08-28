@@ -38,6 +38,11 @@ Reply with ONLY a JSON object:
 "reject" = the change should not proceed to verification as-is (blocking problem).
 "revise" = it will likely pass but has a major issue worth fixing.
 "accept" = no blocking or major issue found.
+
+Do NOT reject for: style, naming, formatting, a slightly longer-than-minimal but
+correct implementation, an extra helper, a missing docstring update, or "I would
+have done it differently". Those are at most "minor". Only "reject" when you can
+name a concrete way the change fails the contract or the target test.
 """
 
 

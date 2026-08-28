@@ -347,15 +347,6 @@ class Orchestrator:
                 task_id, f"budget exhausted: {be.summary}", state=State.WAITING_FOR_USER
             )
 
-        # Milestone E — one-shot Critic pass before verification (opt-in)
-        if self.critic is not None and critic_round == 0:
-            revised = self._critic_pass(task_id, contract, plan, combined_diff, workspace_path)
-            if revised is not None:
-                return self._execute_verify_settle(
-                    task_id, revised, plan, workspace_path,
-                    approved_steps=approved_steps, critic_round=1,
-                )
-
         self._transition(task_id, State.VERIFYING)
         verification = self.verifier.verify(
             task_id=task_id,
@@ -364,6 +355,39 @@ class Orchestrator:
             original_workspace=workspace_path,
         )
         self.log.append(task_id, EventKind.VERIFICATION, verification)
+
+        # Milestone E — Critic pass, positioned so it can never false-reject a
+        # T0-passing diff (research: over-rejection is the real risk).
+        if self.critic is not None:
+            report = self._critic_pass(task_id, contract, combined_diff, workspace_path)
+            if verification.overall != "pass" and report.verdict == "reject" and critic_round == 0:
+                # T0 already failed; feed the findings into one bounded retry
+                revised = contract.model_copy(
+                    update={
+                        "constraints": list(contract.constraints)
+                        + [f"critic: {f.claim}" for f in report.findings if f.claim]
+                    }
+                )
+                self._emit_handoff(task_id, report)
+                self._transition(task_id, State.STALLED)
+                self._transition(task_id, State.RECOVERING)
+                self._transition(task_id, State.EXECUTING)
+                return self._execute_verify_settle(
+                    task_id, revised, plan, workspace_path,
+                    approved_steps=approved_steps, critic_round=1,
+                )
+            if verification.overall == "pass" and report.verdict == "reject":
+                # T0 is authoritative — log the disagreement, do not retry
+                self.log.append(
+                    task_id,
+                    EventKind.DISAGREEMENT,
+                    {
+                        "between": ["critic", "verifier_t0"],
+                        "detail": report.summary
+                        or "critic rejected a T0-passing diff",
+                        "findings": [f.claim for f in report.findings],
+                    },
+                )
 
         if verification.overall == "pass":
             self._transition(task_id, State.COMPLETED)
@@ -614,9 +638,9 @@ class Orchestrator:
         except OSError:
             return ""
 
-    def _critic_pass(self, task_id, contract, plan, combined_diff, workspace_path):
-        """Run the Critic on the diff. Returns a revised contract to retry with,
-        or None to proceed to verification."""
+    def _critic_pass(self, task_id, contract, combined_diff, workspace_path):
+        """Run the Critic on the diff; log CRITIC + CRITIQUE message; return the
+        CriticReport. The caller decides what to do with the verdict."""
         from app.services.agents.messages import emit_message
         from app.services.verify.verifier_t0 import extract_pytest_target
 
@@ -631,8 +655,10 @@ class Orchestrator:
             claims=[f.claim for f in report.findings],
             confidence_summary=f"verdict={report.verdict}",
         )
-        if report.verdict != "reject":
-            return None
+        return report
+
+    def _emit_handoff(self, task_id, report) -> None:
+        from app.services.agents.messages import emit_message
 
         findings = [f"critic: {f.claim}" for f in report.findings if f.claim] or [
             "critic rejected the change; revise it to satisfy the target test exactly"
@@ -641,9 +667,6 @@ class Orchestrator:
             self.log, task_id,
             sender="critic", role="critic", intent="HANDOFF",
             requested_action="revise", claims=findings,
-        )
-        return contract.model_copy(
-            update={"constraints": list(contract.constraints) + findings}
         )
 
     def _run_target(self, ws: str, target: str | None) -> str:
