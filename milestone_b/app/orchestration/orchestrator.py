@@ -107,6 +107,8 @@ class Orchestrator:
         self._runner = runner  # per-step measurement sandbox; lazy if None
         self.critic = critic  # Milestone E — opt-in; None = single-agent path
         self.verifier_t2 = None  # Milestone E — set to a VerifierT2 to enable the ensemble
+        self.researcher = None  # Milestone E — set to a Researcher to enable the ladder rung
+        self.role_perf = None  # Milestone E — RolePerformanceStore for shadow metrics
 
     def _step_runner(self):
         if self._runner is None:
@@ -276,6 +278,7 @@ class Orchestrator:
                 claims=[s.intent for s in plan.steps],
                 requested_action="execute",
             )
+            self._emit_composition(task_id, contract)
 
             self._transition(task_id, State.EXECUTING)
             return self._execute_verify_settle(
@@ -504,7 +507,10 @@ class Orchestrator:
         target = extract_pytest_target(contract.required_evidence)
         progress = ProgressService(task_id, patience_for(contract.task_class))
         loop = LoopDetector()
-        ladder = Ladder()
+        ladder = Ladder(
+            has_critic=self.critic is not None,
+            has_researcher=self.researcher is not None,
+        )
         budget = BudgetTracker(contract.budget, contract.task_class)
         soft_warned = False
         combined_diff = ""
@@ -577,7 +583,7 @@ class Orchestrator:
                 if effective in ("STALLED", "LOOP_RISK"):
                     outcome, new_steps = self._run_ladder(
                         task_id, contract, workspace_path, ladder,
-                        reason=effective, tried=pe.detail,
+                        reason=effective, tried=pe.detail, diff=combined_diff,
                     )
                     if outcome == "replanned":
                         steps, i = new_steps, 0
@@ -695,6 +701,27 @@ class Orchestrator:
 
         emit_message(self.log, task_id, sender=sender, role=sender, intent=intent, **kw)
 
+    def _emit_composition(self, task_id, contract) -> None:
+        from app.services.agents.composition import select_roles
+
+        active = {"builder"}
+        if self.critic is not None:
+            active.add("critic")
+        if self.verifier_t2 is not None:
+            active.add("verifier_t2")
+        if self.researcher is not None:
+            active.add("researcher")
+        comp = select_roles(contract, role_perf=self.role_perf)
+        self.log.append(
+            task_id,
+            EventKind.COMPOSITION,
+            {
+                "active_roles": sorted(active | comp.roles),
+                "reasons": comp.reasons,
+                "task_class": contract.task_class,
+            },
+        )
+
     def _t2_pass(self, task_id, contract, combined_diff, t0, workspace_path):
         """Run the T2 ensemble. Returns an escalation detail string if a human
         should review, else None (T0 verdict stands)."""
@@ -762,9 +789,10 @@ class Orchestrator:
         )
         return (result.stdout or "") + (result.stderr or "")
 
-    def _run_ladder(self, task_id, contract, workspace_path, ladder, *, reason, tried):
+    def _run_ladder(self, task_id, contract, workspace_path, ladder, *, reason, tried, diff=""):
         """Advance the escalation ladder until an actionable rung. Returns
         ("replanned", new_steps) or ("ask_user", None)."""
+        research_note = ""
         while not ladder.exhausted():
             rung = ladder.advance()
             self.log.append(
@@ -779,19 +807,54 @@ class Orchestrator:
             )
             if not rung.actionable:
                 continue
+            if rung.name == "critic" and self.critic is not None:
+                report = self._critic_pass(task_id, contract, diff, workspace_path)
+                if report.verdict == "reject" and report.findings:
+                    self._emit_handoff(task_id, report)
+                    return self._replan(
+                        task_id, contract, workspace_path, reason, tried,
+                        extra="\n".join(f"- critic: {f.claim}" for f in report.findings),
+                    )
+                continue  # accept/revise -> advance
+            if rung.name == "research" and self.researcher is not None:
+                research_note = self._do_research(task_id, contract, reason, tried)
+                continue  # research informs the next re-plan
             if rung.name == "change_strategy":
-                listing = self.workspace_lister(workspace_path)
-                note = (
-                    f"\n\nNOTE: the previous plan was {reason} ({tried}). "
-                    "Produce a materially different plan; do not repeat the same edit."
+                return self._replan(
+                    task_id, contract, workspace_path, reason, tried, extra=research_note
                 )
-                new_plan, prun = self.planner.plan(contract, listing + note)
-                self.log.append(task_id, EventKind.PLAN, new_plan)
-                self.log.append(task_id, EventKind.MODEL_RUN, prun)
-                return "replanned", list(new_plan.steps)
             if rung.name == "ask_user":
                 return "ask_user", None
         return "ask_user", None
+
+    def _replan(self, task_id, contract, workspace_path, reason, tried, *, extra=""):
+        listing = self.workspace_lister(workspace_path)
+        note = (
+            f"\n\nNOTE: the previous plan was {reason} ({tried}). "
+            "Produce a materially different plan; do not repeat the same edit."
+        )
+        if extra:
+            note += "\nRESEARCH / CRITIQUE:\n" + extra
+        new_plan, prun = self.planner.plan(contract, listing + note)
+        self.log.append(task_id, EventKind.PLAN, new_plan)
+        self.log.append(task_id, EventKind.MODEL_RUN, prun)
+        return "replanned", list(new_plan.steps)
+
+    def _do_research(self, task_id, contract, reason, tried) -> str:
+        from app.services.agents.messages import emit_message
+
+        question = f"How to resolve: {contract.objective} (task {reason}: {tried})"
+        evidence, claims, run = self.researcher.research(task_id, question)
+        self.log.append(task_id, EventKind.MODEL_RUN, run)
+        for ev in evidence:
+            self.log.append(task_id, EventKind.EVIDENCE, ev.model_dump(mode="json"))
+        emit_message(
+            self.log, task_id,
+            sender="researcher", role="researcher", intent="EVIDENCE",
+            claims=[c.text for c in claims],
+            evidence_refs=[e.id for e in evidence],
+        )
+        return "\n".join(f"- {c.text}" for c in claims[:5])
 
     # ------------------------------------------------------------------ #
     def _snap(self, task_id: str) -> TaskSnapshot:

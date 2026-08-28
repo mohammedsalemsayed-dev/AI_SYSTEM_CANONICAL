@@ -118,3 +118,28 @@ Now real (slice scope):
 Stubbed: ladder rungs critic/research/stronger_model; coverage/lint/type-error signals
 (defined, unpopulated); REPAIR escalates rather than auto-re-interpreting; cost dimension
 unmetered on the subscription path.
+
+## Milestone E — multi-agent coordination (`milestone_b/`, days 1–14)
+
+219 tests green. See `milestone_b/MILESTONE_E_NOTES.md`.
+
+Now real (slice scope):
+- **Critic** — one-shot pass, fresh context (contract + diff + target test, not the build
+  narrative). T0 runs first; the Critic can never turn a T0-passing diff into a failure
+  (a `reject` there is a logged `DISAGREEMENT`); a `reject` on a T0-fail drives one bounded
+  retry with findings. Opt-in until the benchmark promotes it.
+- **Structured `AgentMessage`** on every inter-role hand-off.
+- **Independent T2 ensemble verifier** — model reconstructed-spec check from contract + diff
+  alone, N contexts; advisory (T0 authoritative); escalates a T0-pass/T2-fail only when
+  `risk_level ≥ medium` or a risky path.
+- **Disagreement protocol** — name claims → discriminating test (T0) → synthesise → escalate
+  if consequential.
+- **Researcher** — query plan → egress-broker fetch (default deny) → claims + `EvidenceRecord`s
+  at `retrieved_web` trust; wired to the D ladder `research` rung (fills that stub); the
+  `critic` ladder rung is also real now.
+- **Composition rule** + in-memory **RolePerformance** shadow tracking; `COMPOSITION` event.
+- **Single-vs-multi benchmark** harness (`tests/benchmark/run_multiagent_bench.py`) — not yet
+  run; needs the subscription; the Critic promote-to-default decision is gated on it.
+
+Deferred: dedicated `research_web` orchestration (CD-research); real live egress fetch;
+persistent RolePerformance (Milestone F); stronger-model ladder rung (Milestone G).

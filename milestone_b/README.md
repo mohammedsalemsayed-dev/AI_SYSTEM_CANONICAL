@@ -59,6 +59,25 @@ See [MILESTONE_D_NOTES.md](MILESTONE_D_NOTES.md). All 13 days done.
 180 tests green (`python -m pytest`): 128 unit, 24 integration, 28 security.
 Sandbox setup: `docker build -t slice-sandbox:pytest app/services/sandbox/images/pytest-runner`
 
+### Milestone E ([../MILESTONE_E_PLAN.md](../MILESTONE_E_PLAN.md)) — multi-agent coordination
+
+See [MILESTONE_E_NOTES.md](MILESTONE_E_NOTES.md). All 14 days built.
+
+| Days | Deliverable | State |
+|---|---|---|
+| 1–3 | Critic role + structured messaging | **done** |
+| — | Critic reframe (T0-first, can't false-reject) | **done** |
+| 4–5 | `AgentMessage` on every inter-role hand-off | **done** |
+| 6–8 | Independent T2 ensemble verifier + disagreement protocol | **done** |
+| 9–11 | Researcher role + ladder `critic` / `research` rungs made real | **done** |
+| 12 | Composition rule + `RolePerformance` shadow tracking | **done** |
+| 13–14 | Single-vs-multi benchmark harness | **built; not yet run (needs subscription)** |
+
+219 tests green: ~155 unit, ~36 integration, 28 security.
+Multi-agent is opt-in: `Orchestrator(..., critic=Critic(llm))`, `orch.verifier_t2 = VerifierT2(llm)`,
+`orch.researcher = Researcher(llm, broker)`. Benchmark to promote the Critic to default:
+`python -m tests.benchmark.run_multiagent_bench tests/premise/tasks.real.json`
+
 ## Day 10 handoff
 
 The premise test needs real providers:

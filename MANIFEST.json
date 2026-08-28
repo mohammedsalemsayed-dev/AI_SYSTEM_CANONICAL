@@ -29,13 +29,13 @@
     },
     {
       "path": "02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md",
-      "sha256": "d732d48e586cb8a7972919e88e1f788b3436146b613e508e07f7a6f10dbfac6e",
-      "bytes": 6197
+      "sha256": "b061264fbaf0056c6162b54b9272a7f8a67afea15fb75082e785de9bf24f8824",
+      "bytes": 7779
     },
     {
       "path": "02_CONTEXT_AND_TRACEABILITY/REQUIREMENT_TRACEABILITY.md",
-      "sha256": "a8c00a571bc3135197ccacb732c7d981d24e7cda35d9edbada1bc6ff77c83f6f",
-      "bytes": 9075
+      "sha256": "2289b82e918ce429b54bd9105afa8a9ee7d5a800e58a82df5493ee90f429dad7",
+      "bytes": 9412
     },
     {
       "path": "03_IMPLEMENTATION_FOUNDATION/prior_foundation/MANIFEST.json",

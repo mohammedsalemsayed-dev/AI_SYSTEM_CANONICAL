@@ -53,6 +53,8 @@ class EventKind:
     CRITIC = "CRITIC"
     DISAGREEMENT = "DISAGREEMENT"
     ROLE_PERF = "ROLE_PERF"
+    EVIDENCE = "EVIDENCE"
+    COMPOSITION = "COMPOSITION"
 
 
 class Event(BaseModel):

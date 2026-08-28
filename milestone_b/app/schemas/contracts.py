@@ -313,6 +313,27 @@ class RolePerformance(BaseModel):
     rework_delta: float = 0.0
 
 
+TrustLevelEv = Literal["user", "workspace", "tool_output", "retrieved_web", "doc_input"]
+
+
+class Claim(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("clm"))
+    task_id: str
+    text: str
+    source_refs: list[str] = Field(default_factory=list)  # EvidenceRecord ids
+    trust_level: TrustLevelEv = "retrieved_web"
+
+
+class EvidenceRecord(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("ev"))
+    task_id: str
+    kind: str = "web_page"  # web_page | doc | tool_output | measurement
+    source: str = ""  # URL / path
+    trust_level: TrustLevelEv = "retrieved_web"
+    content_excerpt: str = ""
+    ts: float = Field(default_factory=now_ts)
+
+
 # --------------------------------------------------------------------------- #
 # contract gate (leave INTERPRETING)
 # --------------------------------------------------------------------------- #

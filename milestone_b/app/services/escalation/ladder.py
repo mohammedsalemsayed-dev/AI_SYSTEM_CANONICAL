@@ -23,10 +23,18 @@ class Rung:
 
 
 class Ladder:
-    def __init__(self, max_replans: int = 2) -> None:
+    def __init__(
+        self,
+        max_replans: int = 2,
+        *,
+        has_critic: bool = False,
+        has_researcher: bool = False,
+    ) -> None:
         self._i = 0
         self.max_replans = max_replans
         self.replans_used = 0
+        self.has_critic = has_critic
+        self.has_researcher = has_researcher
 
     @property
     def current(self) -> str:
@@ -43,6 +51,10 @@ class Ladder:
                 self.replans_used += 1
                 return Rung("change_strategy", actionable=True)
             return Rung("change_strategy", actionable=False)  # exhausted -> advance
+        if name == "critic":
+            return Rung("critic", actionable=self.has_critic)
+        if name == "research":
+            return Rung("research", actionable=self.has_researcher)
         if name == "ask_user":
             return Rung("ask_user", actionable=True)
         return Rung(name, actionable=False)
