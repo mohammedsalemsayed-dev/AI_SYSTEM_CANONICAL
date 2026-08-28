@@ -111,6 +111,22 @@ class RouteStatsStore:
             "cost_median": _median([r.get("cost_usd", 0.0) for r in runs]),
         }
 
+    # -- canary freeze (Milestone I) ---------------------------- #
+    def freeze(self, task_class: str, model: str, *, reason: str = "") -> None:
+        self._memory.put(
+            MemoryRecord(
+                tier="system", kind="route_freeze", scope=f"{task_class}:{model}",
+                trust="workspace", content=json.dumps({"reason": reason, "ts": time.time()}),
+            )
+        )
+
+    def is_frozen(self, task_class: str, model: str) -> bool:
+        scope = f"{task_class}:{model}"
+        return any(
+            m.kind == "route_freeze" and m.scope == scope
+            for m in self._memory.all(tier="system")
+        )
+
     def eligible_models(self, task_class: str) -> list[str]:
         seen: set[str] = set()
         for m in self._memory.all(tier="system"):

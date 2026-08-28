@@ -134,19 +134,36 @@ class ExperienceStore:
         return exp, False, why
 
     def try_promote(
-        self, exp_id: str, *, human_approved: bool = False
+        self, exp_id: str, *, human_approved: bool = False, report=None
     ) -> tuple[ExperienceRecord, "object"]:
-        """VALIDATED -> PROMOTED -> (auto) MONITORED via the stub offline eval +
-        the security human-approval branch. Returns (record, PromoteDecision)."""
-        from app.services.experience.eval import promote_decision
+        """VALIDATED -> PROMOTED -> (auto) MONITORED.
 
+        With `report` (a Milestone I `EvalReport` from a real held-out replay +
+        guardrail gate) the decision is that report. Without one, the
+        `experience/eval.py` stub is used so the state machine is always
+        exercised offline. Returns (record, decision)."""
         exp = self.get(exp_id)
         if exp is None:
             raise KeyError(exp_id)
-        decision = promote_decision(exp, human_approved=human_approved)
-        self._update(exp)  # persist heldout_n / guardrail_result folded in by the eval
-        if decision.ok and exp.validation_state == "VALIDATED":
-            exp = self.advance(exp_id, "PROMOTED", note=decision.why)
+
+        if report is not None:
+            ok = report.decision == "promote"
+            why = report.why
+            if report.guardrail is not None:
+                exp.guardrail_result = abs(report.guardrail.drop_pp)
+            exp.monitoring_metrics["heldout_n"] = report.heldout_n
+            self._update(exp)
+            decision = report
+        else:
+            from app.services.experience.eval import promote_decision
+
+            decision = promote_decision(exp, human_approved=human_approved)
+            ok = decision.ok
+            why = decision.why
+            self._update(exp)  # persist heldout_n / guardrail_result folded in by the eval
+
+        if ok and exp.validation_state == "VALIDATED":
+            exp = self.advance(exp_id, "PROMOTED", note=why)
             exp = self.advance(exp_id, "MONITORED", note="auto after PROMOTED")
         return exp, decision
 

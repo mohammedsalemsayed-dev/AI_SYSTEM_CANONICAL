@@ -419,6 +419,60 @@ class HardwareSnapshot(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# optimization: guardrail / regression / offline eval / canary (Milestone I)
+# DESIGN_TIGHTENING §8, §11.2
+# --------------------------------------------------------------------------- #
+CanaryVerdict = Literal["PROMOTE", "HOLD", "ROLLBACK"]
+
+
+class SuiteResult(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("suite"))
+    n: int = 0
+    passed: int = 0
+    failures: list[str] = Field(default_factory=list)  # task ids that failed
+    ts: float = Field(default_factory=now_ts)
+
+    @property
+    def pass_rate(self) -> float:
+        return self.passed / self.n if self.n else 0.0
+
+
+class RegressionResult(BaseModel):
+    passed: bool = False
+    drop_pp: float = 0.0                       # baseline pass-rate minus candidate, in points
+    newly_failing: list[str] = Field(default_factory=list)
+    recovered: list[str] = Field(default_factory=list)
+    baseline_rate: float = 0.0
+    candidate_rate: float = 0.0
+    why: str = ""
+
+
+class EvalReport(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("eval"))
+    subject: str = ""                          # experience id / model id / role name
+    kind: str = "experience"                   # experience | model | role
+    heldout_n: int = 0
+    with_success: float = 0.0
+    without_success: float = 0.0
+    delta: float = 0.0
+    guardrail: RegressionResult | None = None
+    decision: str = "hold"                     # promote | hold
+    needs_human: bool = False
+    why: str = ""
+    ts: float = Field(default_factory=now_ts)
+
+
+class Metrics(BaseModel):
+    success_rate_by_class: dict[str, float] = Field(default_factory=dict)
+    rework_rate: float = 0.0
+    verify_tier_distribution: dict[str, int] = Field(default_factory=dict)
+    escalation_frequency: float = 0.0
+    budget_exhaustion_rate: float = 0.0
+    quarantine_events: int = 0
+    tasks: int = 0
+
+
+# --------------------------------------------------------------------------- #
 # contract gate (leave INTERPRETING)
 # --------------------------------------------------------------------------- #
 _T0_PYTEST_RE = re.compile(r"pytest\s+\S+", re.IGNORECASE)

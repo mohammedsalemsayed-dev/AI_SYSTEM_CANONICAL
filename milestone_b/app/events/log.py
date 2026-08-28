@@ -63,6 +63,10 @@ class EventKind:
     ROUTE = "ROUTE"
     HARDWARE = "HARDWARE"
 
+    EVAL = "EVAL"
+    CANARY = "CANARY"
+    REGRESSION = "REGRESSION"
+
 
 class Event(BaseModel):
     seq: int = 0

@@ -116,6 +116,24 @@ See [MILESTONE_G_NOTES.md](MILESTONE_G_NOTES.md). All 14 days built.
 `orch.hardware = HardwareMonitor()`; `RouteStatsStore` auto-builds from `orch.memory`.
 Seed a new model offline: `python -m tests.benchmark.seed_model agent_sdk tests/premise/tasks.seeded.json`
 
+### Milestone I ([../MILESTONE_I_PLAN.md](../MILESTONE_I_PLAN.md)) — optimization
+
+See [MILESTONE_I_NOTES.md](MILESTONE_I_NOTES.md). All 14 days built.
+
+| Days | Deliverable | State |
+|---|---|---|
+| 1–3 | `eval/guardrail.py` + 12-task frozen fixture; `SuiteResult` | **done** |
+| 4–5 | `eval/regression.py` — baseline in system memory + fail-closed gate | **done** |
+| 6–8 | `eval/offline_eval.py` — held-out replay + guardrail gate → `EvalReport`; `try_promote(report=)` | **done** |
+| 9–11 | `eval/canary.py` + experience & routing canary rollback wired into the orchestrator | **done** |
+| 12 | `eval/metrics.py` — §11.2 metric set folded from the log | **done** |
+| 13 | `tests/regression/run_guardrail.py` (real orchestrator; `--offline` smoke) | **built; offline verified, real run not run** |
+| 14 | regression + notes + status/index | **done** |
+
+290 tests green. Optimization is opt-in: `orch.canary_enabled = True`; pass an
+`EvalReport` to `ExperienceStore.try_promote(report=...)`. Gate a change offline:
+`python -m tests.regression.run_guardrail --offline --set-baseline` then `--offline`.
+
 ## Day 10 handoff
 
 The premise test needs real providers:

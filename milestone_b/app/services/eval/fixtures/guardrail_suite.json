@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "note": "Frozen guardrail suite (MILESTONE_I_PLAN.md §2). ~12 canonical tasks in the slice; target ~30. Each task is a self-contained module + a T0 test with a known oracle. `bug` is the shipped-broken source; `fix` is the oracle. The suite is run the same way every time; a change that regresses it does not ship.",
+  "tasks": [
+    {
+      "id": "off-by-one",
+      "task_class": "code_edit_local",
+      "tags": ["off-by-one", "boundary"],
+      "module": "m.py",
+      "bug": "def upto(n):\n    return list(range(n + 1))\n",
+      "fix": "def upto(n):\n    return list(range(n))\n",
+      "test": "from m import upto\n\n\ndef test_upto():\n    assert upto(3) == [0, 1, 2]\n"
+    },
+    {
+      "id": "empty-input",
+      "task_class": "code_edit_local",
+      "tags": ["empty", "null"],
+      "module": "m.py",
+      "bug": "def first(xs):\n    return xs[0]\n",
+      "fix": "def first(xs):\n    return xs[0] if xs else None\n",
+      "test": "from m import first\n\n\ndef test_first():\n    assert first([]) is None\n    assert first([9]) == 9\n"
+    },
+    {
+      "id": "null-guard",
+      "task_class": "code_edit_local",
+      "tags": ["null", "none"],
+      "module": "m.py",
+      "bug": "def name_len(s):\n    return len(s)\n",
+      "fix": "def name_len(s):\n    return len(s) if s is not None else 0\n",
+      "test": "from m import name_len\n\n\ndef test_name_len():\n    assert name_len(None) == 0\n    assert name_len('ab') == 2\n"
+    },
+    {
+      "id": "pagination",
+      "task_class": "code_edit_local",
+      "tags": ["pagination", "off-by-one"],
+      "module": "m.py",
+      "bug": "def page(items, size, n):\n    return items[n * size: (n + 1) * size + 1]\n",
+      "fix": "def page(items, size, n):\n    return items[n * size: (n + 1) * size]\n",
+      "test": "from m import page\n\n\ndef test_page():\n    assert page(list(range(10)), 3, 0) == [0, 1, 2]\n    assert page(list(range(10)), 3, 3) == [9]\n"
+    },
+    {
+      "id": "cache-key",
+      "task_class": "debug",
+      "tags": ["cache", "dict"],
+      "module": "m.py",
+      "bug": "_c = {}\n\n\ndef memo(a, b):\n    if a in _c:\n        return _c[a]\n    _c[a] = a + b\n    return _c[a]\n",
+      "fix": "_c = {}\n\n\ndef memo(a, b):\n    if (a, b) in _c:\n        return _c[(a, b)]\n    _c[(a, b)] = a + b\n    return _c[(a, b)]\n",
+      "test": "from m import memo\n\n\ndef test_memo():\n    assert memo(1, 2) == 3\n    assert memo(1, 5) == 6\n"
+    },
+    {
+      "id": "parser",
+      "task_class": "code_edit_local",
+      "tags": ["parser"],
+      "module": "m.py",
+      "bug": "def parse_kv(s):\n    k, v = s.split('=')\n    return k, v\n",
+      "fix": "def parse_kv(s):\n    k, v = s.split('=', 1)\n    return k, v\n",
+      "test": "from m import parse_kv\n\n\ndef test_parse_kv():\n    assert parse_kv('a=b=c') == ('a', 'b=c')\n"
+    },
+    {
+      "id": "float-round",
+      "task_class": "code_edit_local",
+      "tags": ["float"],
+      "module": "m.py",
+      "bug": "def cents(dollars):\n    return int(dollars * 100)\n",
+      "fix": "def cents(dollars):\n    return round(dollars * 100)\n",
+      "test": "from m import cents\n\n\ndef test_cents():\n    assert cents(1.15) == 115\n"
+    },
+    {
+      "id": "mutable-default",
+      "task_class": "code_edit_local",
+      "tags": ["mutable", "default"],
+      "module": "m.py",
+      "bug": "def add(x, acc=[]):\n    acc.append(x)\n    return acc\n",
+      "fix": "def add(x, acc=None):\n    acc = [] if acc is None else acc\n    acc.append(x)\n    return acc\n",
+      "test": "from m import add\n\n\ndef test_add():\n    assert add(1) == [1]\n    assert add(2) == [2]\n"
+    },
+    {
+      "id": "iterator-exhaustion",
+      "task_class": "debug",
+      "tags": ["iterator", "generator"],
+      "module": "m.py",
+      "bug": "def stats(it):\n    return sum(it), max(it)\n",
+      "fix": "def stats(it):\n    xs = list(it)\n    return sum(xs), max(xs)\n",
+      "test": "from m import stats\n\n\ndef test_stats():\n    assert stats(iter([1, 2, 3])) == (6, 3)\n"
+    },
+    {
+      "id": "regex-anchor",
+      "task_class": "code_edit_local",
+      "tags": ["regex", "parser"],
+      "module": "m.py",
+      "bug": "import re\n\n\ndef is_id(s):\n    return re.match(r'[a-z]+', s) is not None\n",
+      "fix": "import re\n\n\ndef is_id(s):\n    return re.fullmatch(r'[a-z]+', s) is not None\n",
+      "test": "from m import is_id\n\n\ndef test_is_id():\n    assert is_id('abc')\n    assert not is_id('abc1')\n"
+    },
+    {
+      "id": "timezone",
+      "task_class": "code_edit_local",
+      "tags": ["datetime"],
+      "module": "m.py",
+      "bug": "from datetime import datetime, timezone\n\n\ndef to_epoch(dt):\n    return int(dt.timestamp())\n",
+      "fix": "from datetime import timezone\n\n\ndef to_epoch(dt):\n    return int(dt.replace(tzinfo=timezone.utc).timestamp())\n",
+      "test": "from datetime import datetime\nfrom m import to_epoch\n\n\ndef test_to_epoch():\n    assert to_epoch(datetime(1970, 1, 1, 0, 0, 1)) == 1\n"
+    },
+    {
+      "id": "division-guard",
+      "task_class": "code_edit_local",
+      "tags": ["division", "boundary"],
+      "module": "m.py",
+      "bug": "def mean(xs):\n    return sum(xs) / len(xs)\n",
+      "fix": "def mean(xs):\n    return sum(xs) / len(xs) if xs else 0.0\n",
+      "test": "from m import mean\n\n\ndef test_mean():\n    assert mean([]) == 0.0\n    assert mean([2, 4]) == 3.0\n"
+    }
+  ]
+}

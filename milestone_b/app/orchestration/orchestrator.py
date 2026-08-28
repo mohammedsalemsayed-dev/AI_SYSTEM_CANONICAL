@@ -114,6 +114,11 @@ class Orchestrator:
         self.router = None  # Milestone G — set to a Router to enable provider routing
         self.route_stats = None  # Milestone G — RouteStatsStore; auto-built from memory
         self.hardware = None  # Milestone G — set to a HardwareMonitor for mode policy
+        self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
+        self.canary_fraction = 0.20  # Milestone I — live cohort fraction
+        self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
+        self._exp_canaries: dict[str, object] = {}
+        self._route_canaries: dict[str, object] = {}
 
     def _step_runner(self):
         if self._runner is None:
@@ -444,10 +449,12 @@ class Orchestrator:
             self._remember_completion(task_id, contract, combined_diff, verification)
             self._capture_experience(task_id, contract, verification)
             self._ingest_route_stats(task_id, contract, verification)
+            self._settle_canaries(task_id, contract, verified=True)
             return self._finish(
                 task_id, "completed", state=State.COMPLETED,
                 verified=True, verification_ref=verification.id,
             )
+        self._settle_canaries(task_id, contract, verified=False)
         self._transition(task_id, State.FAILED)
         return self._finish(
             task_id,
@@ -917,6 +924,86 @@ class Orchestrator:
         decision.reason = f"stronger_model rung: {decision.reason}"
         self.log.append(task_id, EventKind.ROUTE, decision.model_dump(mode="json"))
         return decision
+
+    # ------------------------------------------------------------------ #
+    # Milestone I — canary cohorts for freshly promoted changes
+    # ------------------------------------------------------------------ #
+    def _settle_canaries(self, task_id, contract, *, verified: bool) -> None:
+        if not self.canary_enabled:
+            return
+        self._settle_experience_canaries(task_id, contract, verified=verified)
+        self._settle_route_canary(task_id, contract, verified=verified)
+
+    def _settle_experience_canaries(self, task_id, contract, *, verified: bool) -> None:
+        if self.experience is None:
+            return
+        from app.services.eval.canary import CanaryController
+
+        for exp_id in dict.fromkeys(self._task_proposed_experiences(task_id)):
+            exp = self.experience.get(exp_id)
+            if exp is None or exp.validation_state not in ("PROMOTED", "MONITORED"):
+                continue
+            ctrl = self._exp_canaries.get(exp_id)
+            if ctrl is None:
+                baseline = float(exp.monitoring_metrics.get("canary_baseline", exp.success_score or 0.8))
+                ctrl = CanaryController(
+                    baseline, fraction=self.canary_fraction,
+                    min_samples=self.canary_min_samples, seed=hash(exp_id) & 0xFFFF,
+                )
+                self._exp_canaries[exp_id] = ctrl
+            if getattr(ctrl, "done", False) or not ctrl.sample(task_id):
+                continue
+            verdict = ctrl.record(verified)
+            self.log.append(
+                task_id, EventKind.CANARY,
+                {"kind": "experience", "subject": exp_id, "verdict": verdict,
+                 **ctrl.snapshot()},
+            )
+            if verdict == "ROLLBACK":
+                rolled = self.experience.record_use(exp_id, verified=False, catastrophic=True)
+                self.log.append(
+                    task_id, EventKind.EXPERIENCE_TRANSITION,
+                    {"id": exp_id, "state": rolled.validation_state,
+                     "trigger": "canary_rollback",
+                     "reason": f"canary success {ctrl.snapshot()['rate']:.0%} vs baseline "
+                     f"{ctrl.baseline_success:.0%}"},
+                )
+
+    def _settle_route_canary(self, task_id, contract, *, verified: bool) -> None:
+        if self.route_stats is None:
+            return
+        from app.services.eval.canary import CanaryController
+
+        challenger = next(
+            (e.payload for e in self.log.read(task_id)
+             if e.kind == EventKind.ROUTE and e.payload.get("data_driven")),
+            None,
+        )
+        if challenger is None:
+            return
+        tc, model = contract.task_class, challenger["provider_id"]
+        key = f"{tc}:{model}"
+        ctrl = self._route_canaries.get(key)
+        if ctrl is None:
+            incumbent = self.route_stats.aggregate(tc, model).get("success_rate", 0.8) or 0.8
+            ctrl = CanaryController(
+                incumbent, fraction=self.canary_fraction,
+                min_samples=self.canary_min_samples, seed=hash(key) & 0xFFFF,
+            )
+            self._route_canaries[key] = ctrl
+        if getattr(ctrl, "done", False):
+            return
+        verdict = ctrl.record(verified)
+        self.log.append(
+            task_id, EventKind.CANARY,
+            {"kind": "route", "subject": key, "verdict": verdict, **ctrl.snapshot()},
+        )
+        if verdict == "ROLLBACK":
+            self.route_stats.freeze(tc, model, reason="canary rollback")
+            self.log.append(
+                task_id, EventKind.REGRESSION,
+                {"kind": "route_freeze", "task_class": tc, "model": model},
+            )
 
     def _emit_composition(self, task_id, contract) -> None:
         from app.services.agents.composition import select_roles

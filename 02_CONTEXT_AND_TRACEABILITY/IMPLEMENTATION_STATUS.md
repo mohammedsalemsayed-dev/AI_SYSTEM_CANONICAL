@@ -218,3 +218,34 @@ Now real (slice scope):
 Deferred: local model backend adapters (registry rows exist, unavailable); per-task role-LLM
 swap from the chosen `ProviderSpec`; real hardware telemetry; logistic-regression weight fit
 + canary (Milestone I).
+
+## Milestone I — optimization (`milestone_b/`, days 1–14)
+
+290 tests green. All 14 days built. See `milestone_b/MILESTONE_I_NOTES.md`.
+
+Now real (slice scope):
+- **Frozen guardrail suite** — `eval/guardrail.py` + a 12-task JSON fixture (each a
+  self-contained module + T0 test with a known oracle); `GuardrailSuite.run(run_one)` with an
+  injected runner, deterministic order, crash = fail. Target ~30.
+- **Regression gate** — `eval/regression.py`: `check_regression()` passes iff aggregate drop
+  ≤ 2 pp **and** no previously-passing guardrail task now fails. `RegressionBaseline` on the
+  system memory tier; `certify()` fails closed with no baseline.
+- **Offline eval** — `eval/offline_eval.py`: `OfflineEval.evaluate()` replays a held-out set
+  with vs. without the change, then the guardrail gate; `decision="promote"` only at
+  `heldout_n ≥ 10` + non-negative delta + guardrail held; security-scope subjects still need
+  human approval. `ExperienceStore.try_promote(report=)` consumes a real `EvalReport`.
+- **Canary** — `eval/canary.py` `CanaryController` (deterministic fractional cohort,
+  HOLD/PROMOTE/ROLLBACK). Orchestrator (opt-in `canary_enabled`): a freshly-promoted
+  experience's canary cohort underperforming → auto-`QUARANTINED` + `CANARY` event; a
+  data-driven routing challenger underperforming → `route_freeze` in system memory + the
+  router skips it.
+- **Derived metrics** — `eval/metrics.py` `rebuild_metrics()` folds the event log into the
+  §11.2 set (success by class, rework rate, verify-tier mix, escalation freq, budget-exhaust
+  rate, quarantine count). Pure function, no store.
+- **Standalone runner** — `tests/regression/run_guardrail.py` (real orchestrator; `--offline`
+  scripted smoke path verified; real-model run not run here).
+- **Event kinds** — `EVAL`, `CANARY`, `REGRESSION`.
+
+Deferred: the real held-out numbers (need the subscription); guardrail suite growth to ~30;
+wiring `OfflineEval` into an orchestrator-driven promotion job; logistic-regression weight
+fit; scheduled/continuous guardrail runs (need Milestone H).

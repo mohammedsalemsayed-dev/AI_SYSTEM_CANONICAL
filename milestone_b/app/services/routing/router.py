@@ -152,6 +152,7 @@ class Router:
             (s, self._score(s, task_class, hardware_mode))
             for s in avail
             if self.stats.eligible(task_class, s.model or s.id)
+            and not getattr(self.stats, "is_frozen", lambda *_: False)(task_class, s.model or s.id)
         ]
         if not scored:
             return None
