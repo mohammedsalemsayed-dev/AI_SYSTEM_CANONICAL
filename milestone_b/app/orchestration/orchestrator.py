@@ -126,6 +126,7 @@ class Orchestrator:
         self.tool_loop = None  # Milestone T — a ToolLoop (or zero-arg factory) for `ops` tasks
         self.per_file_policy = False  # Milestone V — re-run the Policy Engine per changed file
         self.fallback_builder = None  # local-first: a stronger Builder to retry with once if verification fails
+        self.builder_registry = None  # {provider_id: Builder} — when set with a Router, the route decision picks the Builder
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -352,10 +353,20 @@ class Orchestrator:
         critic_round: int = 0,
         builder_round: int = 0,
     ) -> TaskResult:
+        # route-driven Builder pick (round 0 only; the fallback path owns round 1).
+        _route_primary = None
+        if builder_round == 0 and self.builder_registry and self.router is not None:
+            picked = self._route_builder()
+            if picked is not None and picked is not self.builder:
+                _route_primary, self.builder = self.builder, picked
         try:
-            combined_diff = self._execute(
-                task_id, contract, plan, workspace_path, approved_steps
-            )
+            try:
+                combined_diff = self._execute(
+                    task_id, contract, plan, workspace_path, approved_steps
+                )
+            finally:
+                if _route_primary is not None:
+                    self.builder = _route_primary  # restore before any retry/settle
             self._msg(
                 task_id, "builder", "HANDOFF",
                 claims=[f"diff: {len(combined_diff.encode('utf-8'))} bytes"],
@@ -1236,6 +1247,23 @@ class Orchestrator:
             self._transition(task_id, State.WAITING_FOR_USER)
             return False
         return None
+
+    def _route_builder(self):
+        """Map the most recent ROUTE decision's provider_id to a Builder from
+        `self.builder_registry`. Falls back to an exact-id miss -> a `local` /
+        `agent_sdk` family match -> None (caller keeps its default builder)."""
+        reg = self.builder_registry or {}
+        pid = ""
+        for e in reversed(self.log.all()):
+            if e.kind == EventKind.ROUTE:
+                pid = e.payload.get("provider_id", "") or ""
+                break
+        if not pid:
+            return None
+        if pid in reg:
+            return reg[pid]
+        fam = "local" if pid.startswith("local") else ("agent_sdk" if "agent" in pid else pid)
+        return reg.get(fam)
 
     def _ingest_route_stats(self, task_id, contract, verification) -> None:
         if self.router is None or self.memory is None:

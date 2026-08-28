@@ -72,13 +72,23 @@ def main(argv: list[str] | None = None) -> int:
         help="if the Builder's diff fails verification, retry ONCE with this "
              "builder (e.g. agent_sdk). Default: agent_sdk when --local-builder is set.",
     )
+    parser.add_argument(
+        "--full", action="store_true",
+        help="wire the COMPLETE agent roster: local-first Builder + cloud "
+             "fallback, Router + provider registry, Critic, independent T2 "
+             "verifier, research pipeline, memory + experience + role metrics. "
+             "Implies --local. Deterministic agents (Router/Hardware/Policy/"
+             "Progress) are always on.",
+    )
     args = parser.parse_args(argv)
 
+    if args.full:
+        args.local = True
     if args.local:
         args.interpreter_llm = args.interpreter_llm or "local:qwen3:8b"
         args.planner_llm = args.planner_llm or "local:qwen3:8b"
         args.critic_llm = args.critic_llm or "local:qwen3:8b"
-        if args.local_builder and args.builder in ("agent_sdk", None):
+        if (args.local_builder or args.full) and args.builder in ("agent_sdk", None):
             args.builder = "local:qwen3:8b"
             args.fallback_builder = args.fallback_builder or "agent_sdk"
 
@@ -122,6 +132,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.fallback_builder:
             orch.fallback_builder = get_builder(args.fallback_builder)
             print(f"     fallback builder: {args.fallback_builder} (on verification failure)")
+        if args.full:
+            from app.cli.full_stack import wire_full_stack
+
+            wire_full_stack(orch, db_path=args.db)
         result = orch.run(args.request, workspace)
         print_timeline(log, result.task_id)
         print("\n=== result ===")
