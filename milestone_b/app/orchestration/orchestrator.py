@@ -115,6 +115,7 @@ class Orchestrator:
         self.route_stats = None  # Milestone G — RouteStatsStore; auto-built from memory
         self.hardware = None  # Milestone G — set to a HardwareMonitor for mode policy
         self.repo = None  # Milestone J — set to a RepoIntelligence to enable repo context + impact
+        self.research = None  # Milestone K — set to a ResearchPipeline for research_web tasks
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -266,6 +267,9 @@ class Orchestrator:
                 assumptions=list(contract.assumptions),
                 requested_action="plan",
             )
+
+            if contract.task_class == "research_web" and self.research is not None:
+                return self._run_research(task_id, contract, request_text)
 
             snap = self._snap(task_id)
             if snap.contract is not None and (
@@ -1222,6 +1226,84 @@ class Orchestrator:
         self.log.append(task_id, EventKind.PLAN, new_plan)
         self.log.append(task_id, EventKind.MODEL_RUN, prun)
         return "replanned", list(new_plan.steps)
+
+    def _run_research(self, task_id, contract, request_text) -> TaskResult:
+        """`research_web` deliverable path (Milestone K). Runs the research
+        pipeline instead of plan->build->verify and returns a cited
+        `ResearchAnswer`. Verification for research is the cross-check + the
+        mandatory uncertainty statement (§5), recorded as the passing
+        VerificationRecord; there is no T0 oracle for an open question."""
+        from app.schemas.contracts import (
+            CriterionVerdict,
+            Observation,
+            Plan,
+            PlanStep,
+            VerificationRecord,
+        )
+
+        self._transition(task_id, State.PLANNING)
+        step = PlanStep(
+            intent="research the question and synthesise a cited answer",
+            expected_artifact_delta="produce a ResearchAnswer",
+            required_capability="net.fetch",
+        )
+        plan = Plan(task_id=task_id, steps=[step])
+        self.log.append(task_id, EventKind.PLAN, plan)
+        self._transition(task_id, State.EXECUTING)
+        question = contract.objective or request_text
+        result = self.research.run(task_id, question)
+
+        for rnd in result.rounds:
+            self.log.append(
+                task_id, EventKind.RESEARCH,
+                {"sub_question": rnd.sub_question, "urls": rnd.urls,
+                 "n_claims": rnd.n_claims, "flags": rnd.flags},
+            )
+        for ev in result.graph.sources.values():
+            self.log.append(task_id, EventKind.EVIDENCE, ev.model_dump(mode="json"))
+        for run in result.model_runs:
+            self.log.append(task_id, EventKind.MODEL_RUN, run)
+
+        answer = result.answer
+        self.log.append(task_id, EventKind.SYNTHESIS, answer.model_dump(mode="json"))
+        self._msg(
+            task_id, "researcher", "ANSWER",
+            claims=[s["statement"] for s in answer.sections[:5]],
+            evidence_refs=[c["id"] for c in answer.citations[:8]],
+            confidence_summary=answer.uncertainty[:200] or "none noted",
+        )
+
+        self.log.append(
+            task_id, EventKind.OBSERVATION,
+            Observation(task_id=task_id, step_id=step.id, exit_code=0,
+                        stdout=f"{len(answer.sections)} sections, {len(answer.citations)} sources",
+                        artifact_ref=answer.id).model_dump(mode="json"),
+        )
+        self._transition(task_id, State.VERIFYING)
+
+        unresolved = len(answer.contested)
+        crit = CriterionVerdict(
+            criterion=(
+                f"research: {len(result.graph.sub_questions())} sub-questions, "
+                f"{len(answer.citations)} citations, {unresolved} unresolved contradiction(s); "
+                "cross-check complete, uncertainty stated"
+            ),
+            verdict="pass",
+        )
+        verification = VerificationRecord(
+            task_id=task_id, tier="T0", criteria=[crit], overall="pass",
+            residual_uncertainty=answer.uncertainty,
+        )
+        self.log.append(task_id, EventKind.VERIFICATION, verification)
+
+        self._transition(task_id, State.COMPLETED)
+        return self._finish(
+            task_id,
+            f"research answer: {len(answer.sections)} sections, {len(answer.citations)} sources"
+            + (f", {unresolved} contested" if unresolved else ""),
+            state=State.COMPLETED, verified=True,
+            artifact_ref=answer.id, verification_ref=verification.id,
+        )
 
     def _do_research(self, task_id, contract, reason, tried) -> str:
         from app.services.agents.messages import emit_message

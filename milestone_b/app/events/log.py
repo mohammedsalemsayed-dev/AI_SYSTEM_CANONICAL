@@ -70,6 +70,9 @@ class EventKind:
     REPO = "REPO"
     IMPACT = "IMPACT"
 
+    RESEARCH = "RESEARCH"
+    SYNTHESIS = "SYNTHESIS"
+
 
 class Event(BaseModel):
     seq: int = 0

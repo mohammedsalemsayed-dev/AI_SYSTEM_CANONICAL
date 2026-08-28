@@ -473,6 +473,31 @@ class Metrics(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# research pipeline (Milestone K; DESIGN_TIGHTENING §10.2 domain 2, §12)
+# --------------------------------------------------------------------------- #
+class ContradictionRecord(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("contra"))
+    claim_a: str = ""            # Claim id
+    claim_b: str = ""           # Claim id
+    subject: str = ""
+    resolved: bool = False
+    resolution: str = ""        # which side won + why, or "" while unresolved
+
+
+class ResearchAnswer(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("ans"))
+    task_id: str = ""
+    question: str = ""
+    sections: list[dict[str, Any]] = Field(default_factory=list)   # {statement, citation_ids[]}
+    contested: list[dict[str, Any]] = Field(default_factory=list)  # {subject, a, b, a_cites, b_cites}
+    citations: list[dict[str, Any]] = Field(default_factory=list)  # {id, source, host}
+    uncertainty: str = ""
+    flags: list[str] = Field(default_factory=list)                 # injection-scan / coverage flags
+    trust_level: TrustLevelEv = "retrieved_web"
+    ts: float = Field(default_factory=now_ts)
+
+
+# --------------------------------------------------------------------------- #
 # repo intelligence (Milestone J; DESIGN_TIGHTENING §10.2)
 # --------------------------------------------------------------------------- #
 class GitStatus(BaseModel):
@@ -508,6 +533,12 @@ class BreadthAdvice(BaseModel):
 # --------------------------------------------------------------------------- #
 _T0_PYTEST_RE = re.compile(r"pytest\s+\S+", re.IGNORECASE)
 
+# classes whose deliverable is a code diff — these need a runnable T0 oracle.
+# Other classes (research_web, doc_analysis, authoring, planning_arch, qa_explain,
+# ops) verify differently (§5 ladder / §6 deliverable) and only need *some*
+# stated evidence.
+_T0_REQUIRED_CLASSES = frozenset({"code_edit_local", "code_edit_broad", "debug"})
+
 
 def validate_contract(contract: TaskContract) -> list[str]:
     """Return a list of problems. Empty list means the contract passes the
@@ -519,7 +550,7 @@ def validate_contract(contract: TaskContract) -> list[str]:
         problems.append("no success_criteria")
     if not contract.required_evidence:
         problems.append("no required_evidence")
-    else:
+    elif contract.task_class in _T0_REQUIRED_CLASSES:
         has_t0 = any(
             ("t0" in e.lower()) and _T0_PYTEST_RE.search(e) for e in contract.required_evidence
         )

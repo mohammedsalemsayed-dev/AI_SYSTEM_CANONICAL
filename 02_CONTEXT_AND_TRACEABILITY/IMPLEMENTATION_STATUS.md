@@ -320,5 +320,39 @@ Now real (slice scope):
 
 Deferred: tree-sitter multi-language parsing (Python-first now); a `vcs.write`-driven
 work-on-a-branch flow (adapter ready, no step requests it; **no push/PR ever**);
-persistent cross-process index; a dedicated `code_edit_broad` orchestration. Next §10.2
-domains: research pipeline + evidence graph (needs E), then RAG, DOCX/PPTX, engine adapters.
+persistent cross-process index; a dedicated `code_edit_broad` orchestration.
+
+## Milestone K — research pipeline & evidence graph (`milestone_b/`, days 1–14)
+
+344 tests green. All 14 days built. Second §10.2 capability domain. See
+`milestone_b/MILESTONE_K_NOTES.md`.
+
+Now real (slice scope):
+- **Evidence graph** — `app/services/research/evidence_graph.py`: sources + claims + edges
+  (support / agrees / contradicts / answers); `contradictions()`, `is_primary()` (doc kind
+  or official host outranks a generic page; a contradiction auto-resolves when one side has
+  a primary source).
+- **Injection scan** — `research/injection.py` `scan()`: pattern flags for override /
+  role-injection / system-marker / tool-directive / exfiltration. A signal on the answer,
+  not a content gate.
+- **Decompose / cross-check / synthesis** — `research/{decompose,crosscheck,synthesize}.py`:
+  question → 2–5 sub-questions; contradicting-claim detection + bounded (≤ 2) follow-up
+  rounds + resolution; **claims-only** synthesis → `ResearchAnswer{sections+citation_ids,
+  contested, citations, uncertainty}` at `retrieved_web` trust (the synthesis prompt carries
+  no raw source text — unit-asserted).
+- **Pipeline** — `research/pipeline.py` `ResearchPipeline.run()` ties it together over the
+  Milestone E Researcher + egress broker.
+- **Orchestrator** — `orch.research` opt-in; a `research_web` task runs the pipeline instead
+  of plan→build→verify (`PLANNING`→`EXECUTING`→`OBSERVATION`→`VERIFYING`→`COMPLETED`), the
+  `ResearchAnswer` as its artifact; `RESEARCH` + `SYNTHESIS` events.
+- **Contract gate** — `validate_contract` is now task-class-aware: only the code-editing
+  classes require a pytest T0 target.
+- **§12** — source text never reaches a decision prompt; every research node is
+  `retrieved_web` trust so it cannot originate a side effect; a planted "ignore previous
+  instructions … exfiltrate" page is flagged and changes nothing (integration-asserted).
+- **Event kinds** — `RESEARCH`, `SYNTHESIS`.
+
+Deferred: real live egress fetch; embedding retrieval + a persistent knowledge base (→ RAG,
+domain 3); HTML/PDF readability extraction; multi-hop provenance; learned source reputation.
+Next §10.2 domains: RAG / knowledge base (needs this pipeline), DOCX/PPTX authoring, engine
+adapters, automated model selection.
