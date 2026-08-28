@@ -24,7 +24,7 @@ from pathlib import Path
 
 
 def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slice_events.db",
-                    verbose: bool = True) -> list[str]:
+                    t2_on_cloud: bool = True, verbose: bool = True) -> list[str]:
     """Attach every optional agent to `orch`. Returns a list of what was wired."""
     from app.llm import get_llm
     from app.services.agents.brainstorm import Brainstorm
@@ -77,10 +77,15 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
                  if enabled else "builder = cloud (Ollama down)")
 
     # --- Creative agent (pre-plan) + Critic + T2 verifier (advisory) -- #
+    # An independent verifier is only worth its cost if it is a *different,
+    # stronger* judge than the Builder. A local 8B T2 is noisy (it false-flags
+    # correct diffs — see LOCAL_FIRST_BENCH.md), so T2 runs on cloud by default.
+    t2_llm = get_llm("agent_sdk") if t2_on_cloud else lllm
     orch.brainstorm = Brainstorm(lllm)
     orch.critic = Critic(lllm)
-    orch.verifier_t2 = VerifierT2(lllm)
-    wired += ["brainstorm", "critic", "verifier_t2"]
+    orch.verifier_t2 = VerifierT2(t2_llm)
+    wired += ["brainstorm", "critic",
+              "verifier_t2(cloud)" if t2_on_cloud else "verifier_t2(local)"]
 
     # --- research pipeline (research_web + the ladder research rung) --- #
     researcher = Researcher(lllm, EgressBroker(allowlist=[]))

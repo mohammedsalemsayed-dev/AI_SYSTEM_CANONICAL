@@ -34,7 +34,6 @@ from app.services.plan.planner import Planner
 from app.services.policy.engine import PolicyEngine
 from app.services.verify.verifier_t0 import VerifierT0
 
-_OUT = Path("LOCAL_FIRST_BENCH.md")
 _LOCAL = "local:qwen3:8b"
 
 
@@ -76,14 +75,20 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     full = "--full" in argv
     argv = [a for a in argv if a != "--full"]
-    tasks = json.loads(Path("tests/premise/tasks.seeded.json").read_text("utf-8"))
+    tasks_file = "tests/premise/tasks.seeded.json"
+    if "--tasks" in argv:
+        i = argv.index("--tasks")
+        tasks_file = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
+    tasks = json.loads(Path(tasks_file).read_text("utf-8"))
     tasks = [t for t in tasks if Path(t["workspace"]).is_dir()]
     if argv:
         tasks = [t for t in tasks if any(t["id"].startswith(a) for a in argv)]
     if not tasks:
-        print("no seeded repos — run: python -m tests.premise.make_seeded_repos",
-              file=sys.stderr)
+        print(f"no task repos found for {tasks_file}", file=sys.stderr)
         return 2
+    out = Path("LOCAL_FIRST_BENCH.md" if "seeded" in tasks_file
+              else "LOCAL_FIRST_BENCH_REAL.md")
 
     rows = []
     for t in tasks:
@@ -120,8 +125,8 @@ def main(argv: list[str] | None = None) -> int:
             "as a DISAGREEMENT but did not block — T2 on an 8B model is noisy "
             "and is advisory by design.",
         ]
-    _OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"\nlocal {loc}/{n}  escalated {esc}/{n}  failed {fail}/{n}  -> wrote {_OUT}")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"\nlocal {loc}/{n}  escalated {esc}/{n}  failed {fail}/{n}  -> wrote {out}")
     return 0
 
 
