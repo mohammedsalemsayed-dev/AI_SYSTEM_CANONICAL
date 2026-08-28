@@ -67,6 +67,9 @@ class EventKind:
     CANARY = "CANARY"
     REGRESSION = "REGRESSION"
 
+    REPO = "REPO"
+    IMPACT = "IMPACT"
+
 
 class Event(BaseModel):
     seq: int = 0

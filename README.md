@@ -31,8 +31,9 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 | **I** Optimization | frozen guardrail suite, fail-closed regression gate, held-out `OfflineEval` gating promotion, experience & routing canary rollback, `rebuild_metrics` (§11.2) | **built** |
 | **H** Desktop shell | 6 §11.2 read-model folds, loopback HTTP/JSON API, SSE event stream, wired no-build frontend, opt-in gated task submit | **built** |
 | **H** Tauri packaging | Tauri v2 native shell (Rust sidecar supervision) + PyInstaller `nexus-server` sidecar + one-command build | **scaffolded** — not `cargo build`-verified here; needs a Rust + PyInstaller build host |
+| **J** Repo intelligence & Git adapter (§10.2 domain 1) | deterministic Git adapter, `ast` symbol index, import dependency graph, blast-radius `ImpactReport` (dependent modules + affected tests + risk flags), breadth advisory; impact-selected tests widen T0 | **built** |
 
-**314 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`).
+**333 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`).
 
 ### Needs an external resource (built, not run here)
 

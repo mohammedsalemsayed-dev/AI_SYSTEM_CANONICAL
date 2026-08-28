@@ -69,6 +69,7 @@ class VerifierT0:
         contract: TaskContract,
         diff: str,
         original_workspace: str,
+        extra_targets: list[str] | None = None,
     ) -> VerificationRecord:
         target = extract_pytest_target(contract.required_evidence)
         criterion = CriterionVerdict(
@@ -98,10 +99,20 @@ class VerifierT0:
                 )
 
             resolved = _resolve_target(target, ws)
+            # Milestone J — also run tests the impact analysis says the change
+            # could break; they widen the check but the named target still gates.
+            extra_resolved: list[str] = []
+            for t in extra_targets or []:
+                r = _resolve_target(t, ws)
+                if r and r not in resolved.split() and r not in extra_resolved:
+                    from pathlib import Path as _P
+
+                    if (_P(ws) / r.split("::")[0]).exists():
+                        extra_resolved.append(r)
             result = self._runner.run(
                 SandboxSpec(
                     workdir=ws,
-                    command=["python", "-m", "pytest", *resolved.split(), "-q"],
+                    command=["python", "-m", "pytest", *resolved.split(), *extra_resolved, "-q"],
                     network=False,
                     timeout_s=_PYTEST_TIMEOUT_S,
                 )
@@ -125,7 +136,7 @@ class VerifierT0:
             return VerificationRecord(
                 task_id=task_id, tier="T0", criteria=[criterion],
                 overall="pass" if passed else "fail",
-                discriminating_tests_run=[target],
+                discriminating_tests_run=[target, *extra_resolved],
                 residual_uncertainty=""
                 if passed
                 else (result.stdout + result.stderr)[-2000:],

@@ -285,3 +285,40 @@ Deferred: producing the signed native binary (needs Rust + PyInstaller + platfor
 tools + certs); a framework rewrite; SSE poll → push; async submit jobs; auto-update / tray /
 single-instance; live-diff / evidence-graph / experience-browser panels (each = one fold +
 one route).
+
+## Milestone J — repo intelligence & Git adapter (`milestone_b/`, days 1–14)
+
+333 tests green. All 14 days built. First §10.2 capability domain. See
+`milestone_b/MILESTONE_J_NOTES.md`.
+
+Now real (slice scope):
+- **Git adapter** — `app/services/repo/git_adapter.py` `GitAdapter`: deterministic wrapper
+  over the `git` CLI. Read (status / branch / head / clean / tracked / log / blame / show /
+  diff / changed-files) always available; `create_branch` / `commit` gated on a
+  `write_allowed` predicate. One `_run_git` (arg-list, 20 s timeout, `GitError`).
+  **No `fetch`/`pull`/`push`/`remote` method exists.**
+- **Symbol index** — `app/services/repo/index.py` `RepoIndex`: per-file `FileFacts`
+  (defs + imports) via Python `ast`, regex fallback for other languages (flagged
+  `approximate`). Broken files skipped, not fatal. Bounded, derived, rebuilt per `HEAD`.
+- **Module graph** — `app/services/repo/graph.py` `ModuleGraph`: internal import edges;
+  `dependencies` / `dependents` (transitive, cycle-safe); `reachable_dependents` = blast
+  radius; `fan_in`.
+- **Impact analysis** — `app/services/repo/impact.py` `analyze()` → `ImpactReport`:
+  changed → dependent modules (prod only), `tests_affected` (fan-in-ranked, capped),
+  `risk_flags` (`risk-path` / `public-api` / `wide-change` / `symbol-removed` /
+  `signature-changed`). Import reachability is a superset heuristic; T0 stays authoritative.
+- **Breadth classification** — `app/services/repo/breadth.py` `classify_breadth()` →
+  `BreadthAdvice{local|broad, …}`; advisory, never mutates `task_class`.
+- **Facade + wiring** — `RepoIntelligence` (lazy, `head_sha`-cached); `orch.repo` opt-in:
+  `REPO CONTEXT` block for the Interpreter + Planner (`REPO` event); post-build
+  `ImpactReport` (`IMPACT` event + a `repo`-sender `AgentMessage`); the impact's affected
+  tests are passed to `VerifierT0.verify(extra_targets=)` and run alongside the named target
+  (widen the check; the named target still gates COMPLETED). Repo unset → unchanged.
+- **Capability tokens** — `vcs.read`, `vcs.write` (`vcs.branch` / `vcs.commit` are
+  side-effecting → taint + risk-class gated).
+- **Event kinds** — `REPO`, `IMPACT`.
+
+Deferred: tree-sitter multi-language parsing (Python-first now); a `vcs.write`-driven
+work-on-a-branch flow (adapter ready, no step requests it; **no push/PR ever**);
+persistent cross-process index; a dedicated `code_edit_broad` orchestration. Next §10.2
+domains: research pipeline + evidence graph (needs E), then RAG, DOCX/PPTX, engine adapters.

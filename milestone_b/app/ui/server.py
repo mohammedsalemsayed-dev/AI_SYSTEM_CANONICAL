@@ -72,7 +72,7 @@ class _Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/"):
                 return self._api(path, q)
             return self._static(path)
-        except BrokenPipeError:
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         except Exception as exc:  # noqa: BLE001
             try:
@@ -169,7 +169,7 @@ class _Handler(BaseHTTPRequestHandler):
                     last_beat = now
                 self.wfile.flush()
                 time.sleep(_POLL_S)
-        except (BrokenPipeError, ConnectionResetError, OSError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
             pass
         finally:
             log.close()

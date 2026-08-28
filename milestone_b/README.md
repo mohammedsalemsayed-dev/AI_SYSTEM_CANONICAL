@@ -159,6 +159,24 @@ generated icons). 314 tests green. The Rust side is written to the v2 API but no
 `cargo build`-verified here — `python desktop/build.py` on a host with Rust + PyInstaller +
 platform build tools produces the installers.
 
+### Milestone J ([../MILESTONE_J_PLAN.md](../MILESTONE_J_PLAN.md)) — repo intelligence & Git adapter
+
+See [MILESTONE_J_NOTES.md](MILESTONE_J_NOTES.md). All 14 days built. First §10.2 capability domain.
+
+| Days | Deliverable | State |
+|---|---|---|
+| 1–2 | `repo/git_adapter.py` — read ops + `GitError` + `vcs.write`-gated branch/commit | **done** |
+| 3–4 | `repo/index.py` — `ast` symbol index + regex fallback | **done** |
+| 5–6 | `repo/graph.py` — module import graph (transitive, cycle-safe) | **done** |
+| 7–8 | `repo/impact.py` — `ImpactReport` (blast radius, affected tests, risk flags) | **done** |
+| 9 | `repo/breadth.py` — breadth advisory | **done** |
+| 10–11 | `repo/facade.py` + `vcs.read`/`vcs.write` capability tokens | **done** |
+| 12 | orchestrator wiring — Planner repo-context, post-build impact, affected-test selection | **done** |
+| 13–14 | integration + notes + status/index | **done** |
+
+333 tests green. Repo intelligence is opt-in: `orch.repo = RepoIntelligence(workspace_path)`.
+`GitAdapter` has no `fetch`/`pull`/`push`/`remote` — read + local branch/commit only.
+
 ## Day 10 handoff
 
 The premise test needs real providers:
@@ -236,5 +254,6 @@ tests/
 | Progress / loop detection | none | Milestone D / §14.4 |
 | Recovery / reconciliation | `resume()` fails cleanly | Milestone D |
 | Experience repository | `services/experience/` + `services/memory/` — **real** (memory tiers, trust-filtered retrieval, context builder, full §8 lifecycle, advisory retrieval, catastrophic rollback) | real held-out offline eval in Milestone I; vector retrieval in CD-rag |
+| Repo intelligence / Git adapter | `services/repo/` — **real** (Git adapter, `ast` symbol index, import graph, blast-radius `ImpactReport`, breadth advisory) | tree-sitter multi-language parsing; `code_edit_broad` orchestration |
 | Multi-agent (critic, verifier ensemble) | single builder + deterministic T0 | Milestone E / §9 |
 | Verification T1–T3 | T0 only | §5, §14.1 |

@@ -473,6 +473,37 @@ class Metrics(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# repo intelligence (Milestone J; DESIGN_TIGHTENING §10.2)
+# --------------------------------------------------------------------------- #
+class GitStatus(BaseModel):
+    branch: str = ""
+    head_sha: str = ""
+    clean: bool = True
+    staged: list[str] = Field(default_factory=list)
+    unstaged: list[str] = Field(default_factory=list)
+    untracked: list[str] = Field(default_factory=list)
+
+
+class ImpactReport(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("impact"))
+    changed_paths: list[str] = Field(default_factory=list)
+    changed_modules: list[str] = Field(default_factory=list)
+    dependent_modules: list[str] = Field(default_factory=list)   # transitive importers
+    touched_symbols: list[str] = Field(default_factory=list)
+    dependent_symbols: list[str] = Field(default_factory=list)   # approximate (textual)
+    tests_affected: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)          # public-api | risk-path | symbol-removed | signature-changed | wide-change
+    approximate: bool = False
+    ts: float = Field(default_factory=now_ts)
+
+
+class BreadthAdvice(BaseModel):
+    level: Literal["local", "broad"] = "local"
+    why: str = ""
+    escalate_review: bool = False
+
+
+# --------------------------------------------------------------------------- #
 # contract gate (leave INTERPRETING)
 # --------------------------------------------------------------------------- #
 _T0_PYTEST_RE = re.compile(r"pytest\s+\S+", re.IGNORECASE)

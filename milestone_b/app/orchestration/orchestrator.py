@@ -114,6 +114,7 @@ class Orchestrator:
         self.router = None  # Milestone G — set to a Router to enable provider routing
         self.route_stats = None  # Milestone G — RouteStatsStore; auto-built from memory
         self.hardware = None  # Milestone G — set to a HardwareMonitor for mode policy
+        self.repo = None  # Milestone J — set to a RepoIntelligence to enable repo context + impact
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -252,6 +253,10 @@ class Orchestrator:
                 self.log.append(task_id, EventKind.MEMORY, {"used": "context", "chars": len(mem_ctx)})
                 listing = mem_ctx + "\n\n" + listing
 
+            repo_ctx = self._repo_context(task_id, workspace_path, request_text)
+            if repo_ctx:
+                listing = repo_ctx + "\n\n" + listing
+
             contract, run = self.interpreter.compile(task_id, request_text, listing)
             self.log.append(task_id, EventKind.CONTRACT, contract)
             self.log.append(task_id, EventKind.MODEL_RUN, run)
@@ -386,12 +391,15 @@ class Orchestrator:
                 task_id, f"budget exhausted: {be.summary}", state=State.WAITING_FOR_USER
             )
 
+        extra_targets = self._repo_impact(task_id, contract, combined_diff, workspace_path)
+
         self._transition(task_id, State.VERIFYING)
         verification = self.verifier.verify(
             task_id=task_id,
             contract=contract,
             diff=combined_diff,
             original_workspace=workspace_path,
+            extra_targets=extra_targets,
         )
         self.log.append(task_id, EventKind.VERIFICATION, verification)
         self._msg(
@@ -742,6 +750,62 @@ class Orchestrator:
                 for p in e.payload.get("changed_paths", [])
             }
         )
+
+    # ------------------------------------------------------------------ #
+    # Milestone J — repo intelligence
+    # ------------------------------------------------------------------ #
+    def _repo_context(self, task_id, workspace_path, objective_text) -> str:
+        if self.repo is None:
+            return ""
+        try:
+            block = self.repo.context_block(objective_text)
+        except Exception as exc:  # noqa: BLE001 — repo context is best-effort
+            self.log.append(task_id, EventKind.REPO, {"error": repr(exc)})
+            return ""
+        if not block:
+            return ""
+        idx = self.repo.index
+        self.log.append(
+            task_id, EventKind.REPO,
+            {"files": len(idx.files), "modules": len(idx.modules()),
+             "head": (self.repo._cache_key or "")[:12]},
+        )
+        return block
+
+    def _repo_impact(self, task_id, contract, combined_diff, workspace_path) -> list[str]:
+        """Post-build blast-radius analysis. Logs an IMPACT event, emits a
+        breadth advisory, and returns the extra pytest targets T0 should also
+        run. Best-effort — never blocks the loop."""
+        if self.repo is None or not combined_diff.strip():
+            return []
+        try:
+            changed = self._changed_paths(task_id)
+            impact = self.repo.impact_for(changed, combined_diff)
+            advice = self.repo.breadth(contract.task_class, impact)
+        except Exception as exc:  # noqa: BLE001
+            self.log.append(task_id, EventKind.IMPACT, {"error": repr(exc)})
+            return []
+
+        self.log.append(task_id, EventKind.IMPACT, impact.model_dump(mode="json"))
+        self._msg(
+            task_id, "repo", "STATUS",
+            claims=[f"breadth: {advice.level} ({advice.why})"]
+            + ([f"risk flags: {', '.join(impact.risk_flags)}"] if impact.risk_flags else []),
+            confidence_summary="advisory — T0 stays authoritative"
+            + ("; approximate" if impact.approximate else ""),
+        )
+        if advice.level == "broad" and advice.escalate_review:
+            self.log.append(
+                task_id, EventKind.ROUTE,
+                {"task_class": contract.task_class, "provider_id": "",
+                 "reason": f"repo breadth: {advice.why}", "escalated": True,
+                 "data_driven": False, "review_only": True},
+            )
+
+        named = extract_pytest_target(contract.required_evidence) or ""
+        named_files = {tok.split("::")[0] for tok in named.split() if tok}
+        extra = [t for t in impact.tests_affected if t not in named_files]
+        return extra
 
     def _remember_completion(self, task_id, contract, diff, verification) -> None:
         """Project-memory artifact index on a verified completion."""

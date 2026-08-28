@@ -22,11 +22,15 @@ FILE_DELETE = "file.delete"
 SHELL_RUN = "shell.run"
 NET_FETCH = "net.fetch"
 SECRET_USE = "secret.use"
+VCS_READ = "vcs.read"      # git status / log / blame / diff (Milestone J)
+VCS_BRANCH = "vcs.branch"  # create a local branch
+VCS_COMMIT = "vcs.commit"  # local commit — no push, ever
 
 # Operations that change state outside the process. DESIGN_TIGHTENING.md 14.3:
 # a tainted argument on any of these -> DENY.
 SIDE_EFFECTING_OPS: frozenset[str] = frozenset(
-    {FILE_WRITE, FILE_CREATE, FILE_DELETE, SHELL_RUN, NET_FETCH, SECRET_USE}
+    {FILE_WRITE, FILE_CREATE, FILE_DELETE, SHELL_RUN, NET_FETCH, SECRET_USE,
+     VCS_BRANCH, VCS_COMMIT}
 )
 
 
@@ -52,6 +56,12 @@ _REGISTRY: dict[str, CapabilitySpec] = {
         CapabilitySpec("shell.run", frozenset({SHELL_RUN}), notes="sandboxed only"),
         CapabilitySpec("net.fetch", frozenset({NET_FETCH}), needs_network=True),
         CapabilitySpec("secret.use", frozenset({SECRET_USE}), needs_secret=True),
+        CapabilitySpec("vcs.read", frozenset({VCS_READ}), notes="git status/log/blame/diff"),
+        CapabilitySpec(
+            "vcs.write",
+            frozenset({VCS_READ, VCS_BRANCH, VCS_COMMIT}),
+            notes="local branch + local commit only; no remote subcommand exists",
+        ),
     ]
 }
 
@@ -63,6 +73,8 @@ _PRIMARY_OP: dict[str, str] = {
     "shell.run": SHELL_RUN,
     "net.fetch": NET_FETCH,
     "secret.use": SECRET_USE,
+    "vcs.read": VCS_READ,
+    "vcs.write": VCS_COMMIT,
 }
 
 
