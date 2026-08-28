@@ -1,0 +1,334 @@
+"""`Builder` that drives a LOCAL model (Ollama) through an agentic edit loop.
+
+This is the keystone the design has been deferring: an on-device model doing the
+actual multi-turn work — inspect the repo, call tools, read output, edit files,
+re-plan on failure. It runs inside the workspace **copy** the Orchestrator already
+made and already policy-checked for this step (same contract as `AgentSDKBuilder`).
+
+Tools exposed to the model (deliberately small and safe for the slice):
+  list_dir(path)             — names under a dir, recursive, skips .git/pycache
+  read_file(path)            — file text (truncated)
+  write_file(path, content)  — create/overwrite a file
+  edit_file(path, old, new)  — replace the first exact occurrence of `old`
+  run_tests()                — run the contract's pytest target, return output
+  finish(summary)            — stop; the loop also stops on max_turns
+
+Tool-call parsing is tolerant: it takes Ollama's native `message.tool_calls`
+when present, and otherwise parses a JSON object out of `message.content`
+(qwen2.5-coder tends to emit calls that way). Every parse outcome is counted so
+the benchmark can score tool-call reliability per model.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from app.schemas.contracts import PlanStep, TaskContract
+from app.services.build.base import BuildOutput
+from app.services.build.workspace_copy import diff_workspace
+from app.services.verify.verifier_t0 import extract_pytest_target
+
+_HOST = "http://localhost:11434"
+_READ_CAP = 24_000
+_OUT_CAP = 8_000
+_MAX_TURNS = 24
+_TEST_TIMEOUT = 120
+
+_TOOLS = [
+    {"type": "function", "function": {
+        "name": "list_dir", "description": "List files under a directory (recursive).",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+    {"type": "function", "function": {
+        "name": "read_file", "description": "Read a text file.",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}},
+                       "required": ["path"]}}},
+    {"type": "function", "function": {
+        "name": "write_file", "description": "Create or overwrite a file with content.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"]}}},
+    {"type": "function", "function": {
+        "name": "edit_file",
+        "description": "Replace the first exact occurrence of `old` with `new` in a file. "
+                       "(If you pass `content` instead, the whole file is overwritten.)",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}},
+            "required": ["path", "old", "new"]}}},
+    {"type": "function", "function": {
+        "name": "run_tests", "description": "Run the verification test target and return its output.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "finish", "description": "Signal the change is complete.",
+        "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}}}},
+]
+
+_SYSTEM = """You are the Builder in an autonomous coding system. You work ONLY inside the given repository, by calling tools.
+
+Do this in order:
+1. read_file the verification test file. Note EXACTLY what it asserts — return values, exact exception types and message strings, edge cases, and which dict keys / attributes it uses.
+2. read_file the SOURCE module under test. You must see the real current code before changing it — never guess its contents.
+3. Make the SMALLEST source change that makes the test pass as written. Never edit the test file.
+4. Prefer write_file with the full corrected file. (edit_file(path, old, new) also exists for a surgical replace, but only if you copy `old` verbatim from a read_file.)
+5. call run_tests. If it fails, read the failure carefully and change the source again.
+6. When run_tests reports PASS, call finish.
+
+Call exactly one tool per turn. Never answer in prose."""
+
+
+@dataclass
+class BuilderMetrics:
+    model: str = ""
+    turns: int = 0
+    tool_calls: int = 0
+    invalid_tool_calls: int = 0        # unparseable / unknown name
+    bad_arg_calls: int = 0             # known tool, missing/wrong required args
+    tool_confusion: int = 0            # e.g. edit_file called with write_file's `content`
+    edits: int = 0                     # successful write_file / edit_file
+    edit_failures: int = 0            # edit_file whose `old` was not found
+    test_runs: int = 0
+    tests_passed: bool = False
+    finished: bool = False             # model called finish()
+    hit_turn_cap: bool = False
+    wall_s: float = 0.0
+    in_tokens: int = 0
+    out_tokens: int = 0
+    error: str = ""
+
+    def as_dict(self) -> dict:
+        return {k: getattr(self, k) for k in self.__dataclass_fields__}
+
+
+class LocalBuilder:
+    name = "local"
+
+    def __init__(
+        self,
+        model: str = "qwen3:8b",
+        *,
+        host: str = _HOST,
+        max_turns: int = _MAX_TURNS,
+        keep_alive: str = "30m",
+    ) -> None:
+        self.model = model
+        self.host = host.rstrip("/")
+        self.max_turns = max_turns
+        self.keep_alive = keep_alive
+        self.metrics = BuilderMetrics(model=model)
+
+    # -- Builder protocol ------------------------------------------- #
+    def execute(
+        self, *, task_id: str, step: PlanStep, contract: TaskContract, workspace: str
+    ) -> BuildOutput:
+        self.metrics = BuilderMetrics(model=self.model)
+        t0 = time.time()
+        try:
+            self._loop(step, contract, workspace)
+        except Exception as exc:  # noqa: BLE001 — a builder failure is a result
+            self.metrics.error = repr(exc)
+        self.metrics.wall_s = round(time.time() - t0, 1)
+
+        diff, names = diff_workspace(workspace)
+        if not diff.strip():
+            return BuildOutput(
+                changed_paths=[], diff="", exit_code=1,
+                stdout=json.dumps(self.metrics.as_dict()),
+                error=self.metrics.error or "local builder produced no change",
+            )
+        return BuildOutput(
+            changed_paths=names, diff=diff, exit_code=0,
+            stdout=json.dumps(self.metrics.as_dict()),
+        )
+
+    # -- the agentic loop ----------------------------------------- #
+    def _loop(self, step: PlanStep, contract: TaskContract, ws: str) -> None:
+        root = Path(ws).resolve()
+        target = extract_pytest_target(contract.required_evidence) or ""
+        user = (
+            f"OBJECTIVE\n{contract.objective}\n\nTHIS STEP\n{step.intent}\n\n"
+            f"VERIFICATION TARGET\npytest {target or '(none specified)'}\n\n"
+            "Start by reading the test file, then make the fix."
+        )
+        messages = [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": user},
+        ]
+
+        unproductive = 0  # consecutive turns with no read + no successful edit
+        for _ in range(self.max_turns):
+            self.metrics.turns += 1
+            reply = self._chat(messages)
+            messages.append(reply)
+            calls = self._extract_calls(reply)
+            if not calls:
+                self.metrics.invalid_tool_calls += 1
+                unproductive += 1
+                messages.append({"role": "tool", "content":
+                                 "No valid tool call found. Reply with exactly one tool call."})
+                if unproductive >= 6:
+                    return
+                continue
+
+            name, args = calls[0]
+            self.metrics.tool_calls += 1
+            if name == "finish":
+                self.metrics.finished = True
+                return
+            edits_before = self.metrics.edits
+            result = self._dispatch(name, args, root, target, ws)
+            messages.append({"role": "tool", "name": name, "content": result[:_OUT_CAP]})
+
+            progressed = name in ("read_file", "list_dir") or self.metrics.edits > edits_before
+            unproductive = 0 if progressed else unproductive + 1
+            if unproductive >= 6:  # spinning on malformed calls — stop, let verify judge
+                return
+            if name == "run_tests" and self.metrics.tests_passed:
+                messages.append({"role": "user", "content":
+                                 "Tests pass. Call finish now."})
+        self.metrics.hit_turn_cap = True
+
+    # -- Ollama chat -------------------------------------------- #
+    def _chat(self, messages: list[dict]) -> dict:
+        body = {
+            "model": self.model, "messages": messages, "tools": _TOOLS,
+            "stream": False, "keep_alive": self.keep_alive,
+            # agentic tool-use wants fast direct turns, not a CoT preamble each
+            # step; Qwen3 honours this, other models ignore it.
+            "think": False,
+            "options": {"temperature": 0.0},
+        }
+        req = urllib.request.Request(
+            f"{self.host}/api/chat", data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        self.metrics.in_tokens += int(payload.get("prompt_eval_count", 0) or 0)
+        self.metrics.out_tokens += int(payload.get("eval_count", 0) or 0)
+        msg = payload.get("message", {}) or {}
+        return {"role": "assistant", "content": msg.get("content", ""),
+                "tool_calls": msg.get("tool_calls")}
+
+    # -- tolerant tool-call extraction ------------------------- #
+    _KNOWN = {"list_dir", "read_file", "write_file", "edit_file", "run_tests", "finish"}
+
+    def _extract_calls(self, reply: dict) -> list[tuple[str, dict]]:
+        out: list[tuple[str, dict]] = []
+        for tc in reply.get("tool_calls") or []:
+            fn = tc.get("function", {}) or {}
+            name = fn.get("name", "")
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            if name in self._KNOWN:
+                out.append((name, args if isinstance(args, dict) else {}))
+        if out:
+            return out
+        # fallback: a JSON object in the content (qwen2.5-coder style)
+        content = reply.get("content") or ""
+        for m in re.finditer(r"\{(?:[^{}]|\{[^{}]*\})*\}", content):
+            try:
+                obj = json.loads(m.group(0))
+            except ValueError:
+                continue
+            name = obj.get("name") or obj.get("tool") or obj.get("function")
+            args = obj.get("arguments") or obj.get("args") or obj.get("parameters") or {}
+            if name in self._KNOWN and isinstance(args, dict):
+                out.append((name, args))
+                break
+        return out
+
+    # -- tool bodies ------------------------------------------- #
+    def _safe(self, root: Path, rel: str) -> Path | None:
+        try:
+            p = (root / (rel or ".")).resolve()
+            p.relative_to(root)
+            return p
+        except (ValueError, OSError):
+            return None
+
+    def _dispatch(self, name: str, args: dict, root: Path, target: str, ws: str) -> str:
+        if name == "list_dir":
+            base = self._safe(root, str(args.get("path", ".")))
+            if base is None or not base.exists():
+                self.metrics.bad_arg_calls += 1
+                return "error: path outside repo or missing"
+            if base.is_file():
+                return base.name
+            files = sorted(
+                str(f.relative_to(root)).replace("\\", "/")
+                for f in base.rglob("*")
+                if f.is_file() and ".git" not in f.parts and "__pycache__" not in f.parts
+            )
+            return "\n".join(files[:400]) or "(empty)"
+
+        if name == "read_file":
+            p = self._safe(root, str(args.get("path", "")))
+            if p is None or not p.is_file():
+                self.metrics.bad_arg_calls += 1
+                return "error: not a readable file in the repo"
+            return p.read_text("utf-8", "replace")[:_READ_CAP]
+
+        if name == "write_file":
+            p = self._safe(root, str(args.get("path", "")))
+            content = args.get("content")
+            if p is None or not isinstance(content, str):
+                self.metrics.bad_arg_calls += 1
+                return "error: need path (in repo) and string content"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8", newline="\n")
+            self.metrics.edits += 1
+            return f"wrote {p.relative_to(root)} ({len(content)} chars)"
+
+        if name == "edit_file":
+            p = self._safe(root, str(args.get("path", "")))
+            if p is None or not p.is_file():
+                self.metrics.bad_arg_calls += 1
+                return "error: `path` must be an existing file in the repo"
+            old, new = args.get("old"), args.get("new")
+            # lenient: models often call edit_file the way write_file works
+            if isinstance(args.get("content"), str) and not (isinstance(old, str) and isinstance(new, str)):
+                self.metrics.tool_confusion += 1
+                p.write_text(args["content"], encoding="utf-8", newline="\n")
+                self.metrics.edits += 1
+                return f"overwrote {p.relative_to(root)} (you passed `content`; use write_file next time)"
+            if not isinstance(old, str) or not isinstance(new, str):
+                self.metrics.bad_arg_calls += 1
+                return "error: need string `old` and string `new` (or `content` to overwrite)"
+            txt = p.read_text("utf-8", "replace")
+            if old not in txt:
+                self.metrics.edit_failures += 1
+                return "error: `old` text not found exactly; read the file again and copy it verbatim"
+            p.write_text(txt.replace(old, new, 1), encoding="utf-8", newline="\n")
+            self.metrics.edits += 1
+            return f"edited {p.relative_to(root)}"
+
+        if name == "run_tests":
+            self.metrics.test_runs += 1
+            out, passed = self._run_pytest(ws, target)
+            self.metrics.tests_passed = passed
+            return ("PASS\n" if passed else "FAIL\n") + out[:_OUT_CAP]
+
+        self.metrics.invalid_tool_calls += 1
+        return f"error: unknown tool {name!r}"
+
+    @staticmethod
+    def _run_pytest(ws: str, target: str) -> tuple[str, bool]:
+        argv = [sys.executable, "-m", "pytest", "-q"]
+        argv += target.split() if target else []
+        try:
+            p = subprocess.run(argv, cwd=ws, capture_output=True, text=True,
+                               timeout=_TEST_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return f"timed out after {_TEST_TIMEOUT}s", False
+        return (p.stdout + p.stderr), p.returncode == 0
