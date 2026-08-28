@@ -418,6 +418,31 @@ class Orchestrator:
             return self._finish(
                 task_id, f"budget exhausted: {be.summary}", state=State.WAITING_FOR_USER
             )
+        except BuildError as bexc:
+            # local-first: the Builder itself failed (no diff / non-zero exit /
+            # bad step). One bounded retry with the stronger Builder before FAILED.
+            if self.fallback_builder is None or builder_round != 0:
+                raise
+            primary = self.builder
+            self.log.append(
+                task_id, EventKind.ESCALATION,
+                {"reason": "verification failed", "phase": "build",
+                 "from_builder": getattr(primary, "name", "?"),
+                 "to_builder": getattr(self.fallback_builder, "name", "?"),
+                 "detail": str(bexc)[:200]},
+            )
+            self._transition(task_id, State.STALLED)
+            self._transition(task_id, State.RECOVERING)
+            self._transition(task_id, State.EXECUTING)
+            self.builder = self.fallback_builder
+            try:
+                return self._execute_verify_settle(
+                    task_id, contract, plan, workspace_path,
+                    approved_steps=approved_steps, critic_round=critic_round,
+                    builder_round=1,
+                )
+            finally:
+                self.builder = primary
 
         extra_targets = self._repo_impact(task_id, contract, combined_diff, workspace_path)
 
