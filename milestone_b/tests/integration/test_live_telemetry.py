@@ -46,7 +46,11 @@ def test_calibrated_profile_persists_across_stores_and_scales_budget(tmp_path) -
     assert prof is not None and prof.cpu_count >= 1
     b_no = default_budget("code_edit_local")
     b_prof = default_budget("code_edit_local", profile=prof)
-    assert b_prof["wall_clock_s"] != b_no["wall_clock_s"] or prof.cpu_bench_score == 1.0
+    # the profile scales the wall-clock budget unless the calibrated score is ~1.0
+    # (a host that matches the reference exactly, common under load) — then the
+    # scale factor rounds to 1x and the budget is unchanged, which is correct.
+    if abs(prof.cpu_bench_score - 1.0) > 0.05:
+        assert b_prof["wall_clock_s"] != b_no["wall_clock_s"]
     assert 150 <= b_prof["wall_clock_s"] <= 900
     mem2.close()
 

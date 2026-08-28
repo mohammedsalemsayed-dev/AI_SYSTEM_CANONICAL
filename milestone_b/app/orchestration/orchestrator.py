@@ -123,6 +123,7 @@ class Orchestrator:
         self.artifacts = None  # Milestone P — set to an ArtifactStore for versioned artifacts
         self.tools = None  # Milestone S — set to a ToolRegistry to enumerate + dispatch tools
         self._tool_dispatch = None
+        self.tool_loop = None  # Milestone T — a ToolLoop (or zero-arg factory) for `ops` tasks
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -288,6 +289,8 @@ class Orchestrator:
                 return self._run_doc_analysis(task_id, contract, request_text)
             if contract.task_class == "authoring" and self.authoring is not None:
                 return self._run_authoring(task_id, contract, request_text)
+            if contract.task_class == "ops" and self.tool_loop is not None:
+                return self._run_tool_task(task_id, contract, request_text, workspace_path)
 
             snap = self._snap(task_id)
             if snap.contract is not None and (
@@ -1645,6 +1648,163 @@ class Orchestrator:
             f"{len(result.citations)} citations, {len(result.issues)} review issues)",
             state=State.COMPLETED, verified=True,
             artifact_ref=self._last_store_id(task_id) or result.model.id,
+            verification_ref=verification.id,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Milestone T — tool-use execution
+    # ------------------------------------------------------------------ #
+    def _tool_task_grant(self, task_id: str, workspace_path: str):
+        """One CapabilityGrant for the tool loop: the union of the operations of
+        every read-only op the registry exposes, plus any token named in
+        `self.tool_task_capabilities` (e.g. "shell.run"). Least privilege — a
+        side-effecting op the caller did not opt into is simply never authorised,
+        so the dispatcher denies it and the loop records the denial."""
+        from app.schemas.contracts import CapabilityGrant
+        from app.services.capability.registry import spec_for
+
+        tokens: set[str] = set(getattr(self, "tool_task_capabilities", None) or [])
+        for adapter in self.tools.all():
+            for op in adapter.manifest().ops:
+                if not op.side_effecting:
+                    tokens.add(op.capability)
+        ops: set[str] = set()
+        for tok in tokens:
+            spec = spec_for(tok)
+            if spec is not None:
+                ops |= set(spec.operations)
+        grant = CapabilityGrant(
+            task_id=task_id, step_id="tool-loop", token="tool.loop",
+            scope_path=workspace_path, operations=sorted(ops),
+            network_allowlist=list(getattr(self, "tool_task_network", None) or []),
+        )
+        self.log.append(task_id, EventKind.CAPABILITY_GRANT, grant)
+        return grant
+
+    def _run_tool_task(self, task_id, contract, request_text, workspace_path) -> TaskResult:
+        """`ops` deliverable path (Milestone T). Runs the bounded tool-use loop
+        instead of plan->build->verify: the model picks one tool op per turn and
+        each call goes through the Milestone S dispatcher (== the existing Policy
+        Engine + capability grant). The loop works on a workspace COPY, so a
+        side-effecting op never touches the user's tree. The transcript is the
+        artifact; a clean finish within the iteration cap is the passing
+        VerificationRecord."""
+        from app.schemas.contracts import (
+            CriterionVerdict,
+            Observation,
+            Plan,
+            PlanStep,
+            VerificationRecord,
+        )
+        from app.services.tools.base import DispatchContext
+        from app.services.tools.loop import ToolLoop
+
+        loop = self.tool_loop() if callable(self.tool_loop) else self.tool_loop
+        if not isinstance(loop, ToolLoop):
+            # a bare registry/llm pair or a factory that returned something odd
+            raise RuntimeError("self.tool_loop must be a ToolLoop or a zero-arg factory")
+
+        self._transition(task_id, State.PLANNING)
+        step = PlanStep(
+            intent="drive tools toward the objective, one policy-checked call per turn",
+            expected_artifact_delta="produce a tool-use transcript",
+            required_capability="fs.read",
+        )
+        self.log.append(task_id, EventKind.PLAN, Plan(task_id=task_id, steps=[step]))
+        self._transition(task_id, State.EXECUTING)
+
+        objective = contract.objective or request_text
+        manifest_block = self.tools.manifest_block() if self.tools is not None else "TOOLS\n(none)\n"
+        ws = copy_workspace(workspace_path)
+        try:
+            grant = self._tool_task_grant(task_id, ws)
+            ctx = DispatchContext(
+                task_id=task_id, grant=grant, workspace=ws, trust="workspace",
+            )
+            result = loop.run(objective, ctx, manifest_block)
+        finally:
+            cleanup(ws)
+
+        # a non-ALLOW decision the loop saw -> a POLICY_DECISION event (the loop
+        # does no logging; this mirrors what _tool() does for a single dispatch)
+        for decision in result.decisions:
+            self.log.append(task_id, EventKind.POLICY_DECISION,
+                            decision.model_dump(mode="json"))
+        # each dispatched op -> a TOOL event (mirrors _tool()'s payload shape)
+        for t in result.transcript:
+            if t.get("kind") == "result":
+                self.log.append(
+                    task_id, EventKind.TOOL,
+                    {"op": t["op"], "ok": t["ok"], "trust": t["trust"],
+                     "error": (t["error"] or "")[:200], "meta": {}},
+                )
+        self.log.append(
+            task_id, EventKind.TOOL_LOOP,
+            {"objective": objective[:400], "iterations": result.iterations,
+             "ok": result.ok, "done": result.done, "denials": result.denials,
+             "summary": result.summary[:400], "turns": len(result.transcript)},
+        )
+        import json as _json
+
+        art = self._store_artifact(
+            task_id, "tool_transcript",
+            _json.dumps({"objective": objective, "summary": result.summary,
+                         "transcript": result.transcript}, indent=2),
+            logical_key=self._logical_key("ops", objective),
+            trust="tool_output",
+            meta={"iterations": result.iterations, "denials": result.denials,
+                  "ok": result.ok},
+        )
+        if art:
+            self.log.append(task_id, EventKind.ARTIFACT, art)
+
+        calls = sum(1 for t in result.transcript if t.get("kind") == "result")
+        self.log.append(
+            task_id, EventKind.OBSERVATION,
+            Observation(task_id=task_id, step_id=step.id,
+                        exit_code=0 if result.ok else 1,
+                        stdout=f"{calls} tool call(s), {result.iterations} iteration(s), "
+                               f"{result.denials} denial(s)",
+                        artifact_ref=self._last_store_id(task_id) or "",
+                        error="" if result.ok else result.summary).model_dump(mode="json"),
+        )
+
+        if not result.ok:
+            self._transition(task_id, State.FAILED)
+            return self._finish(
+                task_id,
+                f"tool task did not finish cleanly: {result.summary} "
+                f"({result.iterations} iteration(s), {result.denials} denial(s))",
+                state=State.FAILED,
+                artifact_ref=self._last_store_id(task_id) or None,
+            )
+
+        self._transition(task_id, State.VERIFYING)
+        crit = CriterionVerdict(
+            criterion=(
+                f"tool task: loop finished in {result.iterations} iteration(s) within the cap, "
+                f"all {calls} op(s) dispatched through the Policy Engine, "
+                f"{result.denials} denial(s) surfaced as transcript turns"
+            ),
+            verdict="pass",
+        )
+        verification = VerificationRecord(
+            task_id=task_id, tier="T0", criteria=[crit], overall="pass",
+            residual_uncertainty=(
+                "" if not result.denials
+                else f"{result.denials} tool call(s) were policy-denied; the objective "
+                     "may be only partially met"
+            ),
+        )
+        self.log.append(task_id, EventKind.VERIFICATION, verification)
+        self._transition(task_id, State.COMPLETED)
+        return self._finish(
+            task_id,
+            f"tool task: {calls} call(s) over {result.iterations} iteration(s)"
+            + (f", {result.denials} denied" if result.denials else "")
+            + f" — {result.summary}",
+            state=State.COMPLETED, verified=True,
+            artifact_ref=self._last_store_id(task_id) or None,
             verification_ref=verification.id,
         )
 

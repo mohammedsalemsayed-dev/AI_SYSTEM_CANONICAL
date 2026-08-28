@@ -78,6 +78,7 @@ class EventKind:
     SELECTION = "SELECTION"
     TELEMETRY = "TELEMETRY"
     TOOL = "TOOL"
+    TOOL_LOOP = "TOOL_LOOP"
 
 
 class Event(BaseModel):

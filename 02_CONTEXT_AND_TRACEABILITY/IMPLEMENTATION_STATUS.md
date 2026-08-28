@@ -38,7 +38,8 @@ Built since the original scaffold (now FOUNDATION — see the per-milestone sect
 - RAG/indexing (L);
 - document/presentation pipelines (M — Markdown/HTML; DOCX/PPTX/PDF are `Renderer` stubs);
 - event streaming (H — SSE; raw WebSocket not required by the read-model design);
-- tool adapter ecosystem (S — the §5-C dispatch spine; a broad tool catalogue is still additive).
+- tool adapter ecosystem (S — the §5-C dispatch spine; T — a `shell` adapter + a bounded
+  model-driven tool-use loop for `ops` tasks; a broad tool catalogue is still additive).
 
 Still requiring real implementation (needs external infrastructure or a paid resource):
 - persistent PostgreSQL models/migrations (the `EventLog` is the seam; SQLite today);
@@ -578,3 +579,32 @@ Now real (slice scope):
 Deferred: routing the Builder / file edits through the dispatcher; a real tool ecosystem
 (HTTP-API / shell / LSP / cloud-SDK adapters); LLM-driven op selection from the manifest;
 per-op JSON-Schema arg validation; streaming / long-running tool ops.
+
+## Milestone T — tool-use execution (`milestone_b/`, days 1–10)
+
+458 tests green. All 10 days built. Resolves Milestone S's deferred **"LLM-driven op
+selection from the manifest"** and adds a **`shell` adapter**; `ops` becomes a first-class
+deliverable flow. See `milestone_b/MILESTONE_T_NOTES.md`.
+
+Now real (slice scope):
+- **Shell adapter** — `tools/adapters/shell_tool.py` `ShellToolAdapter`: op `shell.exec` →
+  capability `shell.run` (existing token, side-effecting, "sandboxed only"),
+  `output_trust="tool_output"`. Delegates to the `SandboxRunner` seam; clamps timeout ≤ 120 s;
+  bad args / refusal / non-zero exit / timeout → `ToolResult(ok=False)`, never a raise.
+- **Tool-use loop** — `tools/loop.py` `ToolLoop.run(objective, ctx, manifest_block)`: the
+  model is shown the manifest + transcript and emits ONE JSON object per turn —
+  `{"op","args"}` (dispatched through the **Milestone S dispatcher** = the existing Policy
+  Engine + grant) or `{"done","summary"}`. Bounded by `max_iters` (6) + a `parse_budget` (2);
+  a policy-denied op is a transcript turn (`denials`++), not a stop. Deterministic — no
+  wall-clock / random input.
+- **`ops` flow** — `orchestrator._run_tool_task`: `self.tool_loop` opt-in; PLANNING →
+  EXECUTING (runs the loop **on a workspace copy**) → VERIFYING → COMPLETED with a `T0` pass
+  `VerificationRecord`; a loop `ok=False` → FAILED cleanly. Per-op `TOOL` + per-denial
+  `POLICY_DECISION` + one `TOOL_LOOP` summary; the transcript is a `tool_output`-trust
+  artifact. `_tool_task_grant` grants only the union of non-side-effecting registered ops
+  (plus an explicit `self.tool_task_capabilities` opt-in) — `shell.run` is never auto-granted.
+- **Events** — `+ TOOL_LOOP`.
+
+Deferred: routing the Builder (`code_edit_*`) through the loop; parallel / batched tool
+turns; native tool-use blocks in place of JSON turns; per-op retry / self-repair;
+adapters beyond `shell`; streaming a long `shell.exec`.
