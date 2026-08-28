@@ -318,7 +318,9 @@ class Orchestrator:
                 )
 
             self._transition(task_id, State.PLANNING)
-            if self._route_and_check_hardware(task_id, contract) is False:
+            if self._route_and_check_hardware(
+                task_id, contract, context_tokens=len(listing) // 4
+            ) is False:
                 return self._finish(
                     task_id, "paused: hardware protection", state=State.WAITING_FOR_USER
                 )
@@ -1207,7 +1209,7 @@ class Orchestrator:
             if e.kind == EventKind.ROUTE and e.payload.get("provider_id")
         ]
 
-    def _route_and_check_hardware(self, task_id, contract) -> bool | None:
+    def _route_and_check_hardware(self, task_id, contract, *, context_tokens: int = 0) -> bool | None:
         """Sample the hardware mode (pausing on EMERGENCY) and, if a Router is
         wired, pick a provider and record a ROUTE event. Returns False when the
         hardware mode says pause (caller finishes into WAITING_FOR_USER), else None."""
@@ -1246,6 +1248,9 @@ class Orchestrator:
         decision = self.router.route(
             contract.task_class, "builder",
             task_id=task_id, hardware_mode=mode, risk_level=risk,
+            context_tokens=context_tokens,
+            user_requested_cloud="cloud" in (getattr(contract, "original_request", "") or "").lower()
+            and "no cloud" not in (getattr(contract, "original_request", "") or "").lower(),
         )
         self.log.append(task_id, EventKind.ROUTE, decision.model_dump(mode="json"))
         if not decision.provider_id:
