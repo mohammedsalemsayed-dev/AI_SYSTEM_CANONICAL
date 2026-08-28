@@ -42,12 +42,30 @@ Built since the original scaffold (now FOUNDATION — see the per-milestone sect
   model-driven tool-use loop for `ops` tasks; U — D's loop detector wired into that loop;
   a broad tool catalogue is still additive).
 
-Still requiring real implementation (needs external infrastructure or a paid resource):
-- persistent PostgreSQL models/migrations (the `EventLog` is the seam; SQLite today);
+Done since (real-integration work, 2026-08-28/29 — see `milestone_b/*_NOTES.md` /
+`*_BENCH.md` / `REAL_RUN_FINDINGS.md`):
+- **PostgreSQL event store** — `app/events/pg_log.py` (`PostgresEventLog`, psycopg v3,
+  JSONB, append-only, interface-parity with `EventLog`); `open_event_log()` factory;
+  `--db postgres://…` / `NEXUS_DB_URL`. Verified against `postgres:17` + a real task
+  (25 events persisted, survive restart). SQLite stays the zero-dep default.
+- **Local provider adapters** — Ollama tier: `OllamaLLM` (interpret/plan) + `LocalBuilder`
+  (agentic edit loop, `qwen3:8b` on the GPU); benchmarked (`BUILDER_BENCH.md`); wired into
+  the Router + a local-first→cloud-escalation path. Real-bug premise: 1/5 local, 4/5 with
+  escalation (`LOCAL_FIRST_BENCH_REAL.md`).
+- **Native desktop shell** — `python desktop/build.py` produces `NEXUS_0.1.0_x64-setup.exe`
+  (NSIS) + `.msi` (WiX), each bundling the Tauri shell + the frozen `nexus-server` sidecar;
+  launch-verified (spawns sidecar, serves the UI, clean teardown).
+- **Full agent roster** wired via `run_task --full` (Creative/Brainstorm agent added — was
+  the one unimplemented row).
+
+Still requiring real implementation:
+- Alembic migrations (the Postgres schema is `CREATE TABLE IF NOT EXISTS` today) +
+  connection pooling; porting `MemoryStore` / `ExperienceStore` / `RouteStatsStore` to
+  Postgres the same way;
 - Redis/queue strategy where justified;
-- real local/cloud provider adapters (the provider registry + `get_llm` seam exist; no local backend wired);
-- secrets management;
-- complete desktop shell integration (SSE + JSON API + no-build frontend done; native Tauri build not `cargo build`-verified here).
+- secrets management (a vault/KMS integration);
+- macOS/Linux desktop bundles (only the Windows installers are built here);
+- T2-verifier false-positive tuning now that it runs on cloud and can pause a task.
 
 A coding agent must not "simplify away" the remaining items because they are absent from the initial scaffold.
 
