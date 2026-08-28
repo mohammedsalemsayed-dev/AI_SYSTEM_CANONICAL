@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NEXUS — control plane</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <aside class="left">
+    <h1>NEXUS</h1>
+    <div class="hint">read-only view of the event log</div>
+    <div id="tasklist" class="tasklist"></div>
+  </aside>
+
+  <main>
+    <header>
+      <div><b id="task-objective">no task selected</b><small id="task-class"></small></div>
+      <div class="strip" id="health-strip"></div>
+    </header>
+    <section class="timeline" id="timeline"></section>
+    <footer>
+      <input id="submit-request" placeholder="What should the system accomplish? (submit must be enabled server-side)" />
+      <input id="submit-workspace" placeholder="workspace path" />
+      <button id="submit-btn">SUBMIT</button>
+    </footer>
+  </main>
+
+  <aside class="right">
+    <h3>AGENTS</h3>
+    <div id="agents"></div>
+    <h3>METRICS</h3>
+    <div id="metrics"></div>
+    <h3>ROUTING</h3>
+    <div id="routes"></div>
+  </aside>
+
+  <script src="/app.js"></script>
+</body>
+</html>

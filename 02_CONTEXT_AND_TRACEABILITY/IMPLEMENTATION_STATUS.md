@@ -249,3 +249,28 @@ Now real (slice scope):
 Deferred: the real held-out numbers (need the subscription); guardrail suite growth to ~30;
 wiring `OfflineEval` into an orchestrator-driven promotion job; logistic-regression weight
 fit; scheduled/continuous guardrail runs (need Milestone H).
+
+## Milestone H — desktop shell (`milestone_b/`, days 1–14)
+
+306 tests green. All 14 days built. See `milestone_b/MILESTONE_H_NOTES.md`.
+
+Now real (slice scope):
+- **Read models** — `app/ui/readmodels.py`: six pure folds of the event log — task list,
+  per-task timeline (rows + state transitions + spend + verification), agents panel (latest
+  `AgentMessage` per role), system-health strip (hardware mode / budget posture / canary
+  count / quarantine count), metrics panel (wraps `rebuild_metrics`), routing tallies. No
+  state; unmapped event kinds degrade to a generic row.
+- **Event feed** — `app/ui/events.py` `EventFeed` tails the append-only `events` table by
+  `seq`; `sse_frame()` formats Server-Sent-Events.
+- **HTTP + SSE server** — `app/ui/server.py`: stdlib `http.server`, loopback-only, no runtime
+  dependency. `GET /api/*` serve the read models as JSON; `GET /api/stream` tails the log as
+  SSE; `GET /` + assets serve the frontend. `POST /api/tasks` returns 405 unless a `runner`
+  is wired (`--allow-submit`), and a submitted task still passes every gate.
+- **Frontend** — `app/ui/web/{index.html,app.js,style.css}`: one self-contained vanilla-JS
+  page, no build step; subscribes to the stream and renders every panel; reconnects on drop.
+  Replaces the prior static mock. Verified live against a seeded DB.
+- **Entrypoint** — `app/ui/run_ui.py` (`--db`, `--port`, `--allow-submit`).
+
+Deferred: Tauri packaging / native window (a wrapper over the same page + API); a framework
+rewrite; SSE poll → push; async submit jobs; live-diff / evidence-graph / experience-browser
+panels (each = one fold + one route).

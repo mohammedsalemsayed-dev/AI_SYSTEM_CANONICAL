@@ -134,6 +134,24 @@ See [MILESTONE_I_NOTES.md](MILESTONE_I_NOTES.md). All 14 days built.
 `EvalReport` to `ExperienceStore.try_promote(report=...)`. Gate a change offline:
 `python -m tests.regression.run_guardrail --offline --set-baseline` then `--offline`.
 
+### Milestone H ([../MILESTONE_H_PLAN.md](../MILESTONE_H_PLAN.md)) — desktop shell
+
+See [MILESTONE_H_NOTES.md](MILESTONE_H_NOTES.md). All 14 days built.
+
+| Days | Deliverable | State |
+|---|---|---|
+| 1–3 | `app/ui/readmodels.py` — 6 §11.2 folds over the event log | **done** |
+| 4–5 | `app/ui/events.py` — `EventFeed` tail-by-seq + `sse_frame` | **done** |
+| 6–8 | `app/ui/server.py` — stdlib HTTP, all `GET /api/*` routes | **done** |
+| 9–10 | `/api/stream` SSE + `run_ui.py` entrypoint | **done** |
+| 11–12 | `app/ui/web/` — wired vanilla-JS shell (streams + all panels) | **done** |
+| 13 | opt-in `POST /api/tasks` behind an injected runner | **done** |
+| 14 | regression + notes + status/index | **done** |
+
+306 tests green. Dependency-free (stdlib `http.server`, no-build frontend). Run it:
+`python -m app.ui.run_ui --db <event.db> --port 8770` then open `http://127.0.0.1:8770`.
+Tauri packaging is the remaining step.
+
 ## Day 10 handoff
 
 The premise test needs real providers:
