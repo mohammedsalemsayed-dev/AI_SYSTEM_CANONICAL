@@ -25,26 +25,29 @@ Implemented/scaffolded concepts:
 - basic futuristic React UI;
 - initial invariant tests.
 
-Still requiring real implementation:
-- persistent PostgreSQL models/migrations;
-- durable event log and projections;
-- Redis/queue strategy where justified;
-- real local/cloud provider adapters;
-- empirical benchmark harness and registry;
-- capability issuance/expiry and policy engine;
-- approvals and authentication/authorization;
-- secrets management;
-- hardened OS/container sandbox execution;
-- checkpoints and crash recovery integration;
-- structured multi-agent runtime;
-- research/retrieval/source evaluation;
-- repository intelligence and Git adapter;
-- RAG/indexing;
-- document/presentation pipelines;
-- WebSocket/event streaming;
-- complete desktop shell integration.
+Built since the original scaffold (now FOUNDATION — see the per-milestone sections below):
+- durable event log and projections (B);
+- empirical benchmark harness and registry (G, I, O — offline; real numbers need the subscription);
+- capability issuance/expiry and policy engine (C);
+- approvals and authentication/authorization — single-user approval protocol (C);
+- hardened OS/container sandbox execution (C — Docker tier-B; tier-C engine-toolchain seam pending);
+- checkpoints and crash recovery integration (D, Q);
+- structured multi-agent runtime (E);
+- research/retrieval/source evaluation (K);
+- repository intelligence and Git adapter (J);
+- RAG/indexing (L);
+- document/presentation pipelines (M — Markdown/HTML; DOCX/PPTX/PDF are `Renderer` stubs);
+- event streaming (H — SSE; raw WebSocket not required by the read-model design);
+- tool adapter ecosystem (S — the §5-C dispatch spine; a broad tool catalogue is still additive).
 
-A coding agent must not "simplify away" these items because they are absent from the initial scaffold.
+Still requiring real implementation (needs external infrastructure or a paid resource):
+- persistent PostgreSQL models/migrations (the `EventLog` is the seam; SQLite today);
+- Redis/queue strategy where justified;
+- real local/cloud provider adapters (the provider registry + `get_llm` seam exist; no local backend wired);
+- secrets management;
+- complete desktop shell integration (SSE + JSON API + no-build frontend done; native Tauri build not `cargo build`-verified here).
+
+A coding agent must not "simplify away" the remaining items because they are absent from the initial scaffold.
 
 ## Milestone B slice — `milestone_b/` (Days 1–9 built; Day 10 pending)
 
