@@ -22,6 +22,7 @@ def interpreter_reply(
     success_criteria: list[str] | None = None,
     required_evidence: list[str] | None = None,
     ambiguity: list[str] | None = None,
+    risk_level: str = "low",
 ) -> str:
     return json.dumps(
         {
@@ -33,7 +34,7 @@ def interpreter_reply(
             "assumptions": [],
             "ambiguity": ambiguity or [],
             "constraints": [],
-            "risk_level": "low",
+            "risk_level": risk_level,
         }
     )
 

@@ -106,6 +106,7 @@ class Orchestrator:
         self.workspace_lister = workspace_lister
         self._runner = runner  # per-step measurement sandbox; lazy if None
         self.critic = critic  # Milestone E — opt-in; None = single-agent path
+        self.verifier_t2 = None  # Milestone E — set to a VerifierT2 to enable the ensemble
 
     def _step_runner(self):
         if self._runner is None:
@@ -376,6 +377,17 @@ class Orchestrator:
             claims=[f"T0 {verification.overall}"],
             confidence_summary=verification.tier,
         )
+
+        # Milestone E — independent T2 ensemble verifier (opt-in). Advisory: T0
+        # (deterministic) stays authoritative; T2 can only escalate a concern.
+        if self.verifier_t2 is not None:
+            escalate = self._t2_pass(task_id, contract, combined_diff, verification, workspace_path)
+            if escalate is not None:
+                self._transition(task_id, State.WAITING_FOR_USER)
+                return self._finish(
+                    task_id, f"verification disagreement: {escalate}",
+                    state=State.WAITING_FOR_USER,
+                )
 
         # Milestone E — Critic pass, positioned so it can never false-reject a
         # T0-passing diff (research: over-rejection is the real risk).
@@ -682,6 +694,48 @@ class Orchestrator:
         from app.services.agents.messages import emit_message
 
         emit_message(self.log, task_id, sender=sender, role=sender, intent=intent, **kw)
+
+    def _t2_pass(self, task_id, contract, combined_diff, t0, workspace_path):
+        """Run the T2 ensemble. Returns an escalation detail string if a human
+        should review, else None (T0 verdict stands)."""
+        from app.services.agents.disagreement import resolve
+
+        t2, run = self.verifier_t2.verify(
+            task_id=task_id, contract=contract, diff=combined_diff,
+            original_workspace=workspace_path,
+        )
+        self.log.append(task_id, EventKind.VERIFICATION, t2.model_dump(mode="json"))
+        self.log.append(task_id, EventKind.MODEL_RUN, run)
+        self._msg(
+            task_id, "verifier_t2", "STATUS",
+            claims=[f"T2 {t2.overall}"],
+            confidence_summary=t2.residual_uncertainty[:120] or "unanimous",
+        )
+        if t0.overall == t2.overall:
+            return None
+        outcome = resolve(contract, t0, t2)
+        self.log.append(
+            task_id,
+            EventKind.DISAGREEMENT,
+            {
+                "between": ["verifier_t0", "verifier_t2"],
+                "detail": outcome.detail,
+                "resolution": outcome.resolution,
+                "conflicting_claims": outcome.conflicting_claims,
+            },
+        )
+        if outcome.resolution == "escalate":
+            self.log.append(
+                task_id,
+                EventKind.CLARIFICATION,
+                {
+                    "task_id": task_id,
+                    "questions": [outcome.detail],
+                    "why": "T0 / T2 verification disagreement",
+                },
+            )
+            return outcome.detail
+        return None
 
     def _emit_handoff(self, task_id, report) -> None:
         from app.services.agents.messages import emit_message

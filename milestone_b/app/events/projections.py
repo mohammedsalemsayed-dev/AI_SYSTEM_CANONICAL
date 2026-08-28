@@ -39,6 +39,7 @@ class TaskSnapshot:
     capability_grants: list[dict[str, Any]] = field(default_factory=list)
     policy_decisions: list[dict[str, Any]] = field(default_factory=list)
     taint_blocks: list[dict[str, Any]] = field(default_factory=list)
+    advisory_verifications: list[VerificationRecord] = field(default_factory=list)
 
     @property
     def contract_problems(self) -> list[str]:
@@ -72,7 +73,11 @@ def project_task(events: list[Event]) -> TaskSnapshot:
         elif kind == EventKind.OBSERVATION:
             snap.observations.append(Observation.model_validate(payload))
         elif kind == EventKind.VERIFICATION:
-            snap.verification = VerificationRecord.model_validate(payload)
+            record = VerificationRecord.model_validate(payload)
+            if record.tier == "T0":
+                snap.verification = record  # the authoritative one — gates COMPLETED
+            else:
+                snap.advisory_verifications.append(record)  # T1–T3 ensemble, advisory
         elif kind == EventKind.RESULT:
             snap.result = payload
         elif kind == EventKind.ERROR:
