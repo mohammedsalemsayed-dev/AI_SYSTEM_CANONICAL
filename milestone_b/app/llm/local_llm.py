@@ -40,12 +40,14 @@ class OllamaLLM:
         num_ctx: int | None = None,
         temperature: float = 0.0,
         keep_alive: str | None = None,
+        think: bool = False,
     ) -> None:
         self.model = model or DEFAULT_MODEL
         self.host = (host or DEFAULT_HOST).rstrip("/")
         self.timeout_s = timeout_s
         self.num_ctx = num_ctx
         self.temperature = temperature
+        self.think = think
         # how long Ollama keeps the model in VRAM after a call — a longer value
         # avoids a cold reload between the Interpreter and Planner calls.
         self.keep_alive = keep_alive or os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
@@ -75,6 +77,10 @@ class OllamaLLM:
             "stream": False,
             "options": options,
             "keep_alive": self.keep_alive,
+            # Interpreter/Planner want a single JSON object, not a chain-of-thought
+            # preamble. Qwen3 thinks by default and buries the JSON after a large
+            # <think> block that breaks tolerant parsing; other models ignore this.
+            "think": self.think,
         }
         req = urllib.request.Request(
             f"{self.host}/api/generate",

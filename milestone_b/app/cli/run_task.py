@@ -60,18 +60,21 @@ def main(argv: list[str] | None = None) -> int:
                         help="on COMPLETED+verified, write the diff back to --workspace")
     parser.add_argument(
         "--local", action="store_true",
-        help="convenience: Interpreter + Planner (+ Critic) on local:llama3.1:8b, "
-             "Builder stays on agent_sdk (cloud). One local model stays resident "
-             "-- no VRAM swap. Your code/repo listing goes to the local models; "
-             "only the edit step goes to cloud. (A local Builder needs an agentic "
-             "tool-loop around Ollama -- not built yet.)",
+        help="convenience: Interpreter + Planner (+ Critic) on local:qwen3:8b; "
+             "Builder stays on agent_sdk (cloud). One local model resident, no "
+             "VRAM swap. Add --local-builder to run the Builder on qwen3:8b too "
+             "(fully local; benchmarked 9/10 on the seeded bug repos).",
     )
+    parser.add_argument("--local-builder", action="store_true",
+                        help="with --local, run the Builder on local:qwen3:8b (LocalBuilder)")
     args = parser.parse_args(argv)
 
     if args.local:
-        args.interpreter_llm = args.interpreter_llm or "local:llama3.1:8b"
-        args.planner_llm = args.planner_llm or "local:llama3.1:8b"
-        args.critic_llm = args.critic_llm or "local:llama3.1:8b"
+        args.interpreter_llm = args.interpreter_llm or "local:qwen3:8b"
+        args.planner_llm = args.planner_llm or "local:qwen3:8b"
+        args.critic_llm = args.critic_llm or "local:qwen3:8b"
+        if args.local_builder and args.builder in ("agent_sdk", None):
+            args.builder = "local:qwen3:8b"
 
     workspace = os.path.abspath(args.workspace)
     if not os.path.isdir(workspace):
