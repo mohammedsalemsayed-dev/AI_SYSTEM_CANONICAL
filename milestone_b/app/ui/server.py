@@ -28,11 +28,13 @@ _CONTENT_TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/
 class UIServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, addr, *, db_path: str, runner=None, web_dir: Path = _WEB) -> None:
+    def __init__(self, addr, *, db_path: str, runner=None, web_dir: Path = _WEB,
+                 artifacts=None) -> None:
         super().__init__(addr, _Handler)
         self.db_path = db_path
         self.runner = runner
         self.web_dir = web_dir
+        self.artifacts = artifacts  # Milestone P — an ArtifactStore for GET /api/artifacts/{id}
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -120,6 +122,17 @@ class _Handler(BaseHTTPRequestHandler):
                 if not log.read(parts[2]):
                     return self._json({"error": "no such task"}, 404)
                 return self._json(readmodels.agents_panel(log, parts[2]))
+            if len(parts) == 3 and parts[:2] == ["api", "artifacts"]:
+                store = getattr(self.server, "artifacts", None)  # type: ignore[attr-defined]
+                if store is None:
+                    return self._json({"error": "artifact store not wired"}, status=404)
+                ref = store.get(parts[2])
+                if ref is None:
+                    return self._json({"error": "no such artifact"}, status=404)
+                return self._json({
+                    "ref": ref.model_dump(mode="json"),
+                    "text": store.text(parts[2]) if ref.kind != "file_snapshot" else "",
+                })
             return self._json({"error": "not found"}, status=404)
         finally:
             log.close()

@@ -35,7 +35,6 @@ Still requiring real implementation:
 - approvals and authentication/authorization;
 - secrets management;
 - hardened OS/container sandbox execution;
-- real artifact/version tracking;
 - checkpoints and crash recovery integration;
 - structured multi-agent runtime;
 - research/retrieval/source evaluation;
@@ -469,3 +468,27 @@ Now real (slice scope):
 
 Deferred: a real weight fit (needs a scored-run corpus); non-linear models behind
 `WeightSet`; per-role weight sets; automatic quarterly refit scheduling.
+
+## Milestone P — artifact & version tracking (`milestone_b/`, days 1–10)
+
+396 tests green. All 10 days built. Removes "real artifact/version tracking" from the
+"still requiring real implementation" list above. See `milestone_b/MILESTONE_P_NOTES.md`.
+
+Now real (slice scope):
+- **`ArtifactStore`** — `app/services/artifacts/store.py`: SQLite content-addressed blob
+  store (sha-256, deduped) + a `version` chain per `logical_key`. `put()` (auto-parent-link,
+  idempotent on `(logical_key, sha, task_id)`, truncation cap); `get` / `content` / `text` /
+  `history` / `chain` (cycle-safe) / `latest_for` / `diff_versions` (unified diff for text
+  kinds) / `archive_before` (**marks, never deletes** — §11.3).
+- **Orchestrator** — `orch.artifacts` opt-in; the four deliverable paths store a versioned
+  artifact (`diff` / `research_answer` / `kb_answer` / `document`) carrying the deliverable's
+  own trust; the `ARTIFACT` event gains `store_id` / `sha` / `parent_id` / `logical_key`;
+  `TaskResult.artifact_ref` is the store id when wired. Store unset → byte-identical to
+  Milestone O.
+- **Desktop shell** — `UIServer(artifacts=…)` + `GET /api/artifacts/{id}` → `{ref, text}`
+  (read-only; `ref.trust` for badging).
+- **§12** — `put()` requires an explicit trust; a research/KB artifact keeps
+  `retrieved_web` / `doc_input`; no file write, no network call.
+
+Deferred: filesystem materialisation (explicit `fs.write` step); binary artifact kinds (with
+real Milestone M renderers); a UI artifact viewer; automatic archive-tier migration.

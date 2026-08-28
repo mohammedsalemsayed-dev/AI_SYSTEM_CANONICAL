@@ -120,6 +120,7 @@ class Orchestrator:
         self.authoring = None  # Milestone M — set to an AuthoringPipeline for authoring tasks
         self.engines = None  # Milestone N — set to an EngineRegistry for engine-aware context
         self.selection = None  # Milestone O — set to a ModelSelectionController for fitted routing
+        self.artifacts = None  # Milestone P — set to an ArtifactStore for versioned artifacts
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -477,6 +478,7 @@ class Orchestrator:
             return self._finish(
                 task_id, "completed", state=State.COMPLETED,
                 verified=True, verification_ref=verification.id,
+                artifact_ref=self._last_store_id(task_id),
             )
         self._settle_canaries(task_id, contract, verified=False)
         self._transition(task_id, State.FAILED)
@@ -696,7 +698,16 @@ class Orchestrator:
             diff=out.diff,
             bytes=len(out.diff.encode("utf-8")),
         )
-        self.log.append(task_id, EventKind.ARTIFACT, artifact)
+        art_extra = self._store_artifact(
+            task_id, "diff", out.diff,
+            logical_key=self._logical_key("objective", contract.objective),
+            trust="workspace",
+            meta={"changed_paths": out.changed_paths, "step_id": step.id},
+        )
+        self.log.append(
+            task_id, EventKind.ARTIFACT,
+            artifact.model_dump(mode="json") | art_extra,
+        )
         self.log.append(
             task_id,
             EventKind.OBSERVATION,
@@ -756,6 +767,43 @@ class Orchestrator:
         from app.services.memory.context import build_context
 
         return build_context(self.memory, request_text, task_class=task_class)
+
+    # ------------------------------------------------------------------ #
+    # Milestone P — artifact & version tracking
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _logical_key(prefix: str, text: str) -> str:
+        import hashlib
+
+        return f"{prefix}:{hashlib.sha1((text or '').encode('utf-8')).hexdigest()[:12]}"
+
+    def _last_store_id(self, task_id) -> str | None:
+        if self.artifacts is None:
+            return None
+        for e in reversed(self.log.read(task_id)):
+            if e.kind == EventKind.ARTIFACT and e.payload.get("store_id"):
+                return e.payload["store_id"]
+        return None
+
+    def _store_artifact(self, task_id, kind, content, *, logical_key, trust="workspace", meta=None) -> dict:
+        """Write a versioned, content-addressed artifact when a store is wired.
+        Returns a dict of fields to merge into the ARTIFACT event payload
+        (empty when no store)."""
+        if self.artifacts is None:
+            return {}
+        try:
+            ref = self.artifacts.put(
+                kind, content, task_id=task_id, logical_key=logical_key,
+                trust=trust, meta=meta or {},
+            )
+        except Exception as exc:  # noqa: BLE001 — artifact storage is best-effort
+            self.log.append(task_id, EventKind.ERROR, {"error": f"artifact store: {exc!r}"})
+            return {}
+        return {
+            "store_id": ref.id, "sha": ref.sha, "parent_id": ref.parent_id,
+            "logical_key": ref.logical_key, "artifact_kind": ref.kind,
+            "trust": ref.trust,
+        }
 
     def _changed_paths(self, task_id) -> list[str]:
         return sorted(
@@ -1332,6 +1380,14 @@ class Orchestrator:
 
         answer = result.answer
         self.log.append(task_id, EventKind.SYNTHESIS, answer.model_dump(mode="json"))
+        art = self._store_artifact(
+            task_id, "research_answer", answer.model_dump_json(),
+            logical_key=self._logical_key("q", question),
+            trust=answer.trust_level,
+            meta={"sections": len(answer.sections), "citations": len(answer.citations)},
+        )
+        if art:
+            self.log.append(task_id, EventKind.ARTIFACT, art | {"answer_id": answer.id})
         self._msg(
             task_id, "researcher", "ANSWER",
             claims=[s["statement"] for s in answer.sections[:5]],
@@ -1368,7 +1424,8 @@ class Orchestrator:
             f"research answer: {len(answer.sections)} sections, {len(answer.citations)} sources"
             + (f", {unresolved} contested" if unresolved else ""),
             state=State.COMPLETED, verified=True,
-            artifact_ref=answer.id, verification_ref=verification.id,
+            artifact_ref=self._last_store_id(task_id) or answer.id,
+            verification_ref=verification.id,
         )
 
     def _run_doc_analysis(self, task_id, contract, request_text) -> TaskResult:
@@ -1403,6 +1460,13 @@ class Orchestrator:
              "flags": ans.flags, "docs": len(self.kb.documents())},
         )
         self.log.append(task_id, EventKind.SYNTHESIS, ans.model_dump(mode="json"))
+        art = self._store_artifact(
+            task_id, "kb_answer", ans.model_dump_json(),
+            logical_key=self._logical_key("q", question), trust=ans.trust_level,
+            meta={"sections": len(ans.sections), "citations": len(ans.citations)},
+        )
+        if art:
+            self.log.append(task_id, EventKind.ARTIFACT, art | {"answer_id": ans.id})
         self._msg(
             task_id, "kb", "ANSWER",
             claims=[s["statement"] for s in ans.sections[:5]],
@@ -1433,7 +1497,8 @@ class Orchestrator:
             task_id,
             f"kb answer: {len(ans.sections)} sections, {len(ans.citations)} sources",
             state=State.COMPLETED, verified=True,
-            artifact_ref=ans.id, verification_ref=verification.id,
+            artifact_ref=self._last_store_id(task_id) or ans.id,
+            verification_ref=verification.id,
         )
 
     def _run_authoring(self, task_id, contract, request_text) -> TaskResult:
@@ -1476,6 +1541,15 @@ class Orchestrator:
              "text": result.rendered.text, "citations": result.citations,
              "issues": len(result.issues), "flags": result.flags},
         )
+        art = self._store_artifact(
+            task_id, "document", result.rendered.text,
+            logical_key=self._logical_key("doc", result.model.title),
+            trust="workspace",
+            meta={"mime": result.rendered.mime, "title": result.model.title,
+                  "citations": len(result.citations), "issues": len(result.issues)},
+        )
+        if art:
+            self.log.append(task_id, EventKind.ARTIFACT, art | {"model_id": result.model.id})
         self._msg(
             task_id, "author", "ANSWER",
             claims=[f"{result.model.title}: {len(list(result.model.walk()))} sections, "
@@ -1516,7 +1590,8 @@ class Orchestrator:
             f"document: {result.model.title} ({result.rendered.mime}, "
             f"{len(result.citations)} citations, {len(result.issues)} review issues)",
             state=State.COMPLETED, verified=True,
-            artifact_ref=result.model.id, verification_ref=verification.id,
+            artifact_ref=self._last_store_id(task_id) or result.model.id,
+            verification_ref=verification.id,
         )
 
     def _do_research(self, task_id, contract, reason, tried) -> str:
