@@ -112,6 +112,14 @@ def main(argv: list[str] | None = None) -> int:
     for r in rows:
         lines.append(f"| {r['id']} | {r['bucket']} | {r['state']} | "
                      f"{r['verds']} | {r['secs']} |")
+    if full:
+        lines += [
+            "", "`verifications` = [T0 (deterministic, authoritative), T2 "
+            "(local-model ensemble, advisory)]. A `['pass','fail']` row = T0 "
+            "passed and the local T2 verifier raised a concern that was logged "
+            "as a DISAGREEMENT but did not block — T2 on an 8B model is noisy "
+            "and is advisory by design.",
+        ]
     _OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\nlocal {loc}/{n}  escalated {esc}/{n}  failed {fail}/{n}  -> wrote {_OUT}")
     return 0
