@@ -39,7 +39,6 @@ Still requiring real implementation:
 - structured multi-agent runtime;
 - research/retrieval/source evaluation;
 - repository intelligence and Git adapter;
-- tool adapter ecosystem;
 - RAG/indexing;
 - document/presentation pipelines;
 - WebSocket/event streaming;
@@ -544,3 +543,35 @@ Now real (slice scope):
 Deferred: `psutil` / a cross-platform lib; non-NVIDIA GPU probes; the optional router
 low-VRAM cloud bias (budget half landed, routing half is a follow-up); a background sampler;
 power/battery reads; auto-recalibration scheduling.
+
+## Milestone S — tool adapter framework (`milestone_b/`, days 1–10)
+
+445 tests green. All 10 days built. Removes **"tool adapter ecosystem"** from the "still
+requiring real implementation" list above. Not a new §10.2 domain — the §5-C spine that
+unifies the six existing tool-adapter packages (git / research / KB / authoring / engines /
+routing). See `milestone_b/MILESTONE_S_NOTES.md`.
+
+Now real (slice scope):
+- **Contract** — `app/services/tools/base.py`: `ToolOp` / `ToolManifest` / `ToolResult` /
+  `DispatchContext` and a `runtime_checkable` `ToolAdapter` Protocol (`manifest()`,
+  `invoke(op, args, ctx)`).
+- **Registry** — `tools/registry.py` `ToolRegistry`: `register`/`get`/`all`/`find` +
+  `manifest_block()` (one capability-tagged line per op, `MANIFEST_OP_CAP = 40`).
+- **Dispatcher** — `tools/dispatch.py` `ToolDispatcher.run()`: builds an `ActionProposal`
+  and calls the **existing** `PolicyEngine.decide` with the caller's `CapabilityGrant` — it
+  adds no new gate. Unknown op / policy denial / adapter exception all become
+  `ToolResult(ok=False)`, never a raise. On ALLOW the result's `trust` is stamped from the
+  manifest `output_trust` — `retrieved_web` is never laundered to `workspace`.
+- **Adapters** — `git` (read ops `vcs.read`; `git.branch`/`git.commit` gated, local only),
+  `fs` (workspace-scoped by `relative_to` containment; `fs.write` gated), `net` (wraps the
+  default-deny `EgressBroker`, `output_trust="retrieved_web"`), `engine` (read-only
+  `EngineRegistry.detect`).
+- **Orchestrator** — `self.tools` opt-in `ToolRegistry`; when set, `manifest_block()` is
+  prepended to the planning context and `_tool(op, args, ctx)` dispatches + logs a `TOOL`
+  event (and a `POLICY_DECISION` on denial). Unset → planning context + events byte-identical
+  to Milestone R.
+- **Events** — `+ TOOL`.
+
+Deferred: routing the Builder / file edits through the dispatcher; a real tool ecosystem
+(HTTP-API / shell / LSP / cloud-SDK adapters); LLM-driven op selection from the manifest;
+per-op JSON-Schema arg validation; streaming / long-running tool ops.

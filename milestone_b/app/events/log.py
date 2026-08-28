@@ -77,6 +77,7 @@ class EventKind:
     ENGINE = "ENGINE"
     SELECTION = "SELECTION"
     TELEMETRY = "TELEMETRY"
+    TOOL = "TOOL"
 
 
 class Event(BaseModel):

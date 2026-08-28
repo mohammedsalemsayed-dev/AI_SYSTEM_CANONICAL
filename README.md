@@ -40,8 +40,9 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 | **P** Artifact & version tracking | content-addressed `ArtifactStore` (sha-256 deduped blobs) + per-objective version chain with parent lineage + `diff_versions` + mark-never-delete archival (§11.3); the 4 deliverable paths store diff / research / KB / document artifacts at their own trust; `GET /api/artifacts/{id}` in the shell | **built** |
 | **Q** Fault injection & recovery hardening | `app/services/faults/` wrappers (raise real backend exceptions) + a hard-kill log hook; `tests/fault/` 20 cases + a matrix runner (`FAULT_FINDINGS.md`, 14/14) proving safe-terminal / workspace-untouched / clean-`reconcile()` under 13 induced failure modes; forced the `EgressBroker → EgressError` fix | **built** |
 | **R** Telemetry & target-machine calibration | live `HardwareMonitor` reading real RAM/CPU/disk + `nvidia-smi` GPU/VRAM (stdlib + `ctypes`, never raises); one-time `calibrate()` → `HardwareProfile` persisted to system memory; the profile scales the wall-clock budget; hardware sampling now runs every task independent of routing | **built** |
+| **S** Tool adapter framework (§5-C / §10.2 spine) | one `ToolAdapter` Protocol + `ToolRegistry` over the scattered §10.2 tool packages; `manifest_block()` injected at planning + `ToolDispatcher` routing every op through the **existing** Policy Engine + caller `CapabilityGrant` (no new gate); git / fs / net(egress) / engine adapters; manifest `output_trust` stamped on the result so `retrieved_web` is never laundered; a tainted side-effecting op is denied by the existing rule. Routing the Builder through the dispatcher + a real tool ecosystem are the documented next steps | **built** |
 
-**435 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION.**
+**445 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION, now behind one §5-C tool-dispatch spine.**
 
 ### Needs an external resource (built, not run here)
 
@@ -58,7 +59,7 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 
 ```bash
 cd milestone_b
-python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 435 green
+python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 445 green
 python -m app.cli.demo                                                          # offline end-to-end
 python -m app.ui.run_ui --db slice.db --port 8770                               # desktop shell -> http://127.0.0.1:8770
 ```

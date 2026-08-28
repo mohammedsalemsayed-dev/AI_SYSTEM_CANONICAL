@@ -121,6 +121,8 @@ class Orchestrator:
         self.engines = None  # Milestone N — set to an EngineRegistry for engine-aware context
         self.selection = None  # Milestone O — set to a ModelSelectionController for fitted routing
         self.artifacts = None  # Milestone P — set to an ArtifactStore for versioned artifacts
+        self.tools = None  # Milestone S — set to a ToolRegistry to enumerate + dispatch tools
+        self._tool_dispatch = None
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -266,6 +268,9 @@ class Orchestrator:
             engine_ctx = self._engine_context(task_id, workspace_path, request_text)
             if engine_ctx:
                 listing = engine_ctx + "\n\n" + listing
+
+            if self.tools is not None:
+                listing = self.tools.manifest_block() + "\n" + listing
 
             contract, run = self.interpreter.compile(task_id, request_text, listing)
             self.log.append(task_id, EventKind.CONTRACT, contract)
@@ -814,6 +819,34 @@ class Orchestrator:
                 for p in e.payload.get("changed_paths", [])
             }
         )
+
+    # ------------------------------------------------------------------ #
+    # Milestone S — tool adapter framework
+    # ------------------------------------------------------------------ #
+    def _tool(self, qualified_op, args, ctx):
+        """Dispatch one tool op through the framework (which runs it past the
+        existing Policy Engine + capability grant) and log a TOOL event.
+        Returns the ToolResult. No-op-safe: raises if `self.tools` is unset."""
+        if self.tools is None:
+            raise RuntimeError("no ToolRegistry wired")
+        if self._tool_dispatch is None:
+            from app.services.tools.dispatch import ToolDispatcher
+
+            self._tool_dispatch = ToolDispatcher(
+                self.tools, self.policy,
+                risk_globs=getattr(self.policy, "risk_globs", None),
+            )
+        result, decision = self._tool_dispatch.run(qualified_op, args, ctx)
+        if decision is not None and decision.decision != "ALLOW":
+            self.log.append(task_id=getattr(ctx, "task_id", ""),
+                            kind=EventKind.POLICY_DECISION,
+                            payload=decision.model_dump(mode="json"))
+        self.log.append(
+            getattr(ctx, "task_id", ""), EventKind.TOOL,
+            {"op": qualified_op, "ok": result.ok, "trust": result.trust,
+             "error": result.error[:200], "meta": result.meta},
+        )
+        return result
 
     # ------------------------------------------------------------------ #
     # Milestone N — engine adapters + expert modes
