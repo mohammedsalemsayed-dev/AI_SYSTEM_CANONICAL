@@ -27,6 +27,7 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
                     verbose: bool = True) -> list[str]:
     """Attach every optional agent to `orch`. Returns a list of what was wired."""
     from app.llm import get_llm
+    from app.services.agents.brainstorm import Brainstorm
     from app.services.agents.critic import Critic
     from app.services.agents.performance import RolePerformanceStore
     from app.services.agents.researcher import Researcher
@@ -75,10 +76,11 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
     wired.append("builder_registry + local-first + cloud fallback"
                  if enabled else "builder = cloud (Ollama down)")
 
-    # --- Critic + independent T2 verifier (advisory) ------------------ #
+    # --- Creative agent (pre-plan) + Critic + T2 verifier (advisory) -- #
+    orch.brainstorm = Brainstorm(lllm)
     orch.critic = Critic(lllm)
     orch.verifier_t2 = VerifierT2(lllm)
-    wired += ["critic", "verifier_t2"]
+    wired += ["brainstorm", "critic", "verifier_t2"]
 
     # --- research pipeline (research_web + the ladder research rung) --- #
     researcher = Researcher(lllm, EgressBroker(allowlist=[]))

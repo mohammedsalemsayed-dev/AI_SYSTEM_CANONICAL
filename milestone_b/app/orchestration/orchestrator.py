@@ -106,6 +106,7 @@ class Orchestrator:
         self.workspace_lister = workspace_lister
         self._runner = runner  # per-step measurement sandbox; lazy if None
         self.critic = critic  # Milestone E — opt-in; None = single-agent path
+        self.brainstorm = None  # Creative agent — set to a Brainstorm to offer approaches pre-plan
         self.verifier_t2 = None  # Milestone E — set to a VerifierT2 to enable the ensemble
         self.researcher = None  # Milestone E — set to a Researcher to enable the ladder rung
         self.role_perf = None  # Milestone E — RolePerformanceStore for shadow metrics
@@ -322,6 +323,16 @@ class Orchestrator:
                     task_id, "paused: hardware protection", state=State.WAITING_FOR_USER
                 )
             self._experience_advice(task_id, contract)
+            if self.brainstorm is not None:
+                approaches, brun = self.brainstorm.approaches(task_id, contract, listing)
+                self.log.append(task_id, EventKind.MODEL_RUN, brun)
+                if approaches:
+                    self.log.append(task_id, EventKind.BRAINSTORM,
+                                    {"approaches": approaches})
+                    listing = (
+                        "CANDIDATE APPROACHES (from the Creative agent — pick or adapt one):\n"
+                        + "\n".join(f"- {a}" for a in approaches) + "\n\n" + listing
+                    )
             plan, prun = self.planner.plan(contract, listing)
             self.log.append(task_id, EventKind.PLAN, plan)
             self.log.append(task_id, EventKind.MODEL_RUN, prun)
