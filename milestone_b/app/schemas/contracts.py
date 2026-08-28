@@ -270,16 +270,47 @@ class ProgressEvent(BaseModel):
     detail: str = ""
 
 
+AgentIntent = Literal[
+    "QUESTION", "ANSWER", "PROPOSAL", "HANDOFF",
+    "EVIDENCE", "CRITIQUE", "STATUS", "ESCALATION",
+]
+
+
 class AgentMessage(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("msg"))
     sender: str
     role: str
     task_id: str
-    intent: str
+    intent: AgentIntent
     claims: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     requested_action: str | None = None
     confidence_summary: str | None = None
+
+
+class CriticFinding(BaseModel):
+    severity: Literal["blocking", "major", "minor"] = "minor"
+    claim: str
+    evidence_ref: str | None = None
+
+
+class CriticReport(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("crit"))
+    task_id: str
+    verdict: Literal["accept", "revise", "reject"] = "accept"
+    findings: list[CriticFinding] = Field(default_factory=list)
+    summary: str = ""
+
+
+class RolePerformance(BaseModel):
+    role: str
+    task_class: str
+    samples: int = 0
+    baseline_success: float = 0.0
+    with_role_success: float = 0.0
+    defects_caught: int = 0
+    rework_delta: float = 0.0
 
 
 # --------------------------------------------------------------------------- #

@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", default="slice_events.db")
     parser.add_argument("--llm", default=os.environ.get("SLICE_LLM", "anthropic"))
     parser.add_argument("--builder", default=os.environ.get("SLICE_BUILDER", "agent_sdk"))
+    parser.add_argument("--critic", action="store_true", help="run a Critic pass before verify")
     args = parser.parse_args(argv)
 
     workspace = os.path.abspath(args.workspace)
@@ -60,6 +61,11 @@ def main(argv: list[str] | None = None) -> int:
     log = EventLog(args.db)
     try:
         llm = get_llm(args.llm)
+        critic = None
+        if args.critic:
+            from app.services.agents.critic import Critic
+
+            critic = Critic(get_llm(args.llm))
         orch = Orchestrator(
             log,
             Interpreter(llm),
@@ -67,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             get_builder(args.builder),
             VerifierT0(),
             PolicyEngine(),
+            critic=critic,
         )
         result = orch.run(args.request, workspace)
         print_timeline(log, result.task_id)

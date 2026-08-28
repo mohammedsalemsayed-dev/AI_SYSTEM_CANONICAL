@@ -48,6 +48,11 @@ class EventKind:
     RECONCILE = "RECONCILE"
     BUDGET = "BUDGET"
     ESCALATION = "ESCALATION"
+    # Milestone E — multi-agent coordination
+    AGENT_MESSAGE = "AGENT_MESSAGE"
+    CRITIC = "CRITIC"
+    DISAGREEMENT = "DISAGREEMENT"
+    ROLE_PERF = "ROLE_PERF"
 
 
 class Event(BaseModel):

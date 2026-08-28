@@ -95,6 +95,7 @@ class Orchestrator:
         *,
         workspace_lister: Callable[[str], str] = list_workspace,
         runner=None,
+        critic=None,
     ) -> None:
         self.log = log
         self.interpreter = interpreter
@@ -104,6 +105,7 @@ class Orchestrator:
         self.policy = policy
         self.workspace_lister = workspace_lister
         self._runner = runner  # per-step measurement sandbox; lazy if None
+        self.critic = critic  # Milestone E — opt-in; None = single-agent path
 
     def _step_runner(self):
         if self._runner is None:
@@ -281,6 +283,7 @@ class Orchestrator:
         workspace_path: str,
         *,
         approved_steps: set[str],
+        critic_round: int = 0,
     ) -> TaskResult:
         try:
             combined_diff = self._execute(
@@ -343,6 +346,15 @@ class Orchestrator:
             return self._finish(
                 task_id, f"budget exhausted: {be.summary}", state=State.WAITING_FOR_USER
             )
+
+        # Milestone E — one-shot Critic pass before verification (opt-in)
+        if self.critic is not None and critic_round == 0:
+            revised = self._critic_pass(task_id, contract, plan, combined_diff, workspace_path)
+            if revised is not None:
+                return self._execute_verify_settle(
+                    task_id, revised, plan, workspace_path,
+                    approved_steps=approved_steps, critic_round=1,
+                )
 
         self._transition(task_id, State.VERIFYING)
         verification = self.verifier.verify(
@@ -589,6 +601,50 @@ class Orchestrator:
         if out.error or out.exit_code != 0:
             raise BuildError(out.error or f"builder exited {out.exit_code}")
         return proposal, out
+
+    def _read_test_text(self, workspace_path: str, target: str | None) -> str:
+        if not target:
+            return ""
+        from pathlib import Path
+
+        first = target.split()[0].split("::")[0]
+        p = Path(workspace_path) / first
+        try:
+            return p.read_text(encoding="utf-8", errors="replace")[:8000]
+        except OSError:
+            return ""
+
+    def _critic_pass(self, task_id, contract, plan, combined_diff, workspace_path):
+        """Run the Critic on the diff. Returns a revised contract to retry with,
+        or None to proceed to verification."""
+        from app.services.agents.messages import emit_message
+        from app.services.verify.verifier_t0 import extract_pytest_target
+
+        target = extract_pytest_target(contract.required_evidence)
+        test_text = self._read_test_text(workspace_path, target)
+        report, run = self.critic.review(task_id, contract, combined_diff, test_text)
+        self.log.append(task_id, EventKind.CRITIC, report.model_dump(mode="json"))
+        self.log.append(task_id, EventKind.MODEL_RUN, run)
+        emit_message(
+            self.log, task_id,
+            sender="critic", role="critic", intent="CRITIQUE",
+            claims=[f.claim for f in report.findings],
+            confidence_summary=f"verdict={report.verdict}",
+        )
+        if report.verdict != "reject":
+            return None
+
+        findings = [f"critic: {f.claim}" for f in report.findings if f.claim] or [
+            "critic rejected the change; revise it to satisfy the target test exactly"
+        ]
+        emit_message(
+            self.log, task_id,
+            sender="critic", role="critic", intent="HANDOFF",
+            requested_action="revise", claims=findings,
+        )
+        return contract.model_copy(
+            update={"constraints": list(contract.constraints) + findings}
+        )
 
     def _run_target(self, ws: str, target: str | None) -> str:
         if not target:
