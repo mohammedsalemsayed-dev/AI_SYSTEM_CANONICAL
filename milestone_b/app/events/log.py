@@ -73,6 +73,7 @@ class EventKind:
     RESEARCH = "RESEARCH"
     SYNTHESIS = "SYNTHESIS"
     KB = "KB"
+    AUTHORING = "AUTHORING"
 
 
 class Event(BaseModel):

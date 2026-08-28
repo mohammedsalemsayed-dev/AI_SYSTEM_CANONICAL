@@ -117,6 +117,7 @@ class Orchestrator:
         self.repo = None  # Milestone J — set to a RepoIntelligence to enable repo context + impact
         self.research = None  # Milestone K — set to a ResearchPipeline for research_web tasks
         self.kb = None  # Milestone L — set to a KnowledgeBase for doc_analysis tasks
+        self.authoring = None  # Milestone M — set to an AuthoringPipeline for authoring tasks
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -273,6 +274,8 @@ class Orchestrator:
                 return self._run_research(task_id, contract, request_text)
             if contract.task_class == "doc_analysis" and self.kb is not None:
                 return self._run_doc_analysis(task_id, contract, request_text)
+            if contract.task_class == "authoring" and self.authoring is not None:
+                return self._run_authoring(task_id, contract, request_text)
 
             snap = self._snap(task_id)
             if snap.contract is not None and (
@@ -1371,6 +1374,89 @@ class Orchestrator:
             f"kb answer: {len(ans.sections)} sections, {len(ans.citations)} sources",
             state=State.COMPLETED, verified=True,
             artifact_ref=ans.id, verification_ref=verification.id,
+        )
+
+    def _run_authoring(self, task_id, contract, request_text) -> TaskResult:
+        """`authoring` deliverable path (Milestone M): outline -> grounded draft ->
+        review -> render. The rendered document is the artifact; `review` issues
+        are advisory (§7.1)."""
+        from app.schemas.contracts import (
+            CriterionVerdict,
+            Observation,
+            Plan,
+            PlanStep,
+            VerificationRecord,
+        )
+
+        self._transition(task_id, State.PLANNING)
+        step = PlanStep(
+            intent="outline, draft, review and render the document",
+            expected_artifact_delta="produce a rendered document",
+            required_capability="fs.read",
+        )
+        self.log.append(task_id, EventKind.PLAN, Plan(task_id=task_id, steps=[step]))
+        self._transition(task_id, State.EXECUTING)
+
+        brief = contract.objective or request_text
+        mem_ctx = self._memory_context(request_text, contract.task_class)
+        kind = "deck" if "slide" in brief.lower() or "deck" in brief.lower() else "report"
+        result = self.authoring.run(task_id, brief, kind=kind, memory_ctx=mem_ctx)
+
+        self.log.append(
+            task_id, EventKind.AUTHORING,
+            {"title": result.model.title, "kind": result.model.kind,
+             "sections": len(list(result.model.walk())),
+             "issues": [{"kind": i.kind, "section": i.section, "severity": i.severity}
+                        for i in result.issues],
+             "flags": result.flags},
+        )
+        self.log.append(
+            task_id, EventKind.SYNTHESIS,
+            {"id": result.model.id, "mime": result.rendered.mime,
+             "text": result.rendered.text, "citations": result.citations,
+             "issues": len(result.issues), "flags": result.flags},
+        )
+        self._msg(
+            task_id, "author", "ANSWER",
+            claims=[f"{result.model.title}: {len(list(result.model.walk()))} sections, "
+                    f"{len(result.citations)} citations"],
+            confidence_summary=f"{len(result.issues)} review issue(s)"
+            + ("; " + ", ".join(f for f in result.flags) if result.flags else ""),
+        )
+        self.log.append(
+            task_id, EventKind.OBSERVATION,
+            Observation(task_id=task_id, step_id=step.id, exit_code=0,
+                        stdout=f"{result.rendered.mime}, {len(result.rendered.text)} chars",
+                        artifact_ref=result.model.id).model_dump(mode="json"),
+        )
+        self._transition(task_id, State.VERIFYING)
+        blocking = [i for i in result.issues if i.severity == "blocking"]
+        crit = CriterionVerdict(
+            criterion=(
+                f"authoring: outline+draft+review complete, {len(result.issues)} issue(s) "
+                f"({len(blocking)} blocking) reported"
+            ),
+            verdict="pass" if not blocking else "fail",
+        )
+        verification = VerificationRecord(
+            task_id=task_id, tier="T0", criteria=[crit],
+            overall="pass" if not blocking else "fail",
+            residual_uncertainty="; ".join(i.detail for i in result.issues[:5]),
+        )
+        self.log.append(task_id, EventKind.VERIFICATION, verification)
+        if blocking:
+            self._transition(task_id, State.WAITING_FOR_USER)
+            return self._finish(
+                task_id, f"authoring: {len(blocking)} blocking review issue(s)",
+                state=State.WAITING_FOR_USER,
+            )
+        self._transition(task_id, State.COMPLETED)
+        return self._finish(
+            task_id,
+            f"document: {result.model.title} ({result.rendered.mime}, "
+            f"{len(result.citations)} citations, {len(result.issues)} review issues)",
+            state=State.COMPLETED, verified=True,
+            artifact_ref=result.model.id, verification_ref=verification.id,
         )
 
     def _do_research(self, task_id, contract, reason, tried) -> str:

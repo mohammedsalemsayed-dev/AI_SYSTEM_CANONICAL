@@ -383,5 +383,34 @@ Now real (slice scope):
 - **Event kind** — `KB`.
 
 Deferred: a real embedding / RAG framework behind `Retriever`; OCR + office-format parsing;
-cross-encoder rerank; incremental re-index. Next §10.2 domains: DOCX/PPTX authoring, engine
-adapters, automated model selection.
+cross-encoder rerank; incremental re-index.
+
+## Milestone M — authoring pipelines (`milestone_b/`, days 1–14)
+
+369 tests green. All 14 days built. Fourth §10.2 capability domain. See
+`milestone_b/MILESTONE_M_NOTES.md`.
+
+Now real (slice scope):
+- **Document model** — `app/services/authoring/model.py`: `DocumentModel` / `Section` /
+  `Block` (7 kinds) / `Citation`; `all_citations()` in first-reference order; `SlideDeck`
+  (one slide per H2).
+- **Renderers** — `authoring/render.py`: `Renderer` protocol; `MarkdownRenderer` +
+  `HtmlRenderer` ship (references section, escaping, tables/code/lists); `Docx/Pptx/Pdf`
+  renderers are stubs raising `RendererUnavailable` — the §16 integration seam.
+- **outline → draft → review** — `authoring/{outline,draft,review}.py`: retrieval-grounded
+  heading tree (KB-unsupported sections flagged); per-section claims-only body from KB claims
+  + brief + memory context, `doc_input`-trust citations attached; a review pass (structural
+  + LLM) → `Issue[]` (§7.1's review pass).
+- **Pipeline** — `authoring/pipeline.py` `AuthoringPipeline.run()` → `AuthoringResult`; no
+  filesystem write (the artifact is the rendered string).
+- **Orchestrator** — `orch.authoring` opt-in; an `authoring` task runs the pipeline
+  (`PLANNING`→`EXECUTING`→`AUTHORING`+`SYNTHESIS`→`OBSERVATION`→`VERIFYING`→`COMPLETED`);
+  `deck` kind if the brief says "slide"/"deck"; a `blocking` review issue →
+  `WAITING_FOR_USER`.
+- **§12** — grounded claims keep their trust on each `Citation`; no write, no network; the
+  rendered doc is a `workspace` artifact, not evidence.
+- **Event kind** — `AUTHORING`.
+
+Deferred: real DOCX/PPTX/PDF renderers behind `Renderer`; a revise loop; templates/themes;
+generated figures. Next §10.2 domains: engine adapters + expert modes (needs J), automated
+model selection (needs G + ≥ 20 verified runs).
