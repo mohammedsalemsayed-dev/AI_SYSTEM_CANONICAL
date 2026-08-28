@@ -157,14 +157,22 @@ def system_health(log: EventLog, task_ids: list[str] | None = None) -> dict[str,
     ids = task_ids if task_ids is not None else _all_task_ids(log)
     hw_mode = "NORMAL"
     hw_ts = None
+    live: dict[str, Any] = {}
     budget_posture = "ok"
     active_canaries = 0
     rolled_back = 0
     quarantines = 0
     for tid in ids:
         for e in log.read(tid):
-            if e.kind == EventKind.HARDWARE:
+            if e.kind in (EventKind.HARDWARE, EventKind.TELEMETRY):
                 hw_mode, hw_ts = e.payload.get("mode", hw_mode), e.ts
+                if e.payload.get("source", "").startswith("live"):
+                    live = {
+                        k: e.payload[k] for k in
+                        ("ram_percent", "cpu_percent", "disk_free_percent",
+                         "gpu_temp_c", "gpu_percent", "vram_percent", "source")
+                        if k in e.payload
+                    }
             elif e.kind == EventKind.BUDGET:
                 budget_posture = e.payload.get("level", budget_posture)
             elif e.kind == EventKind.CANARY:
@@ -178,6 +186,7 @@ def system_health(log: EventLog, task_ids: list[str] | None = None) -> dict[str,
     return {
         "hardware_mode": hw_mode,
         "hardware_ts": hw_ts,
+        "hardware_live": live or None,
         "budget_posture": budget_posture,
         "canaries_active": active_canaries,
         "canaries_rolled_back": rolled_back,

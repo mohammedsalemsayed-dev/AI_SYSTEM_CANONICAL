@@ -4,8 +4,8 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "4d4d1a603971899292e8753f556bb16246c07e13664309845cd9a5c3166cdb71",
-      "bytes": 7710
+      "sha256": "a1e88cce3732f9bcde80134b6bf77bc64452928a07e78e1e8905c2b9811c96cb",
+      "bytes": 8057
     },
     {
       "path": "00_START_HERE/README_FOR_CLAUDE_CODE.md",
@@ -34,13 +34,13 @@
     },
     {
       "path": "02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md",
-      "sha256": "6ed49e4dad1f99c8216a513bd80a8604d783ce7b013e89be7847578d96813bb9",
-      "bytes": 32254
+      "sha256": "cfa5ab7f686ba3bc37b162cde7ee99f5cdc7801f3f05f0ccf1a000f3fbdadd43",
+      "bytes": 34159
     },
     {
       "path": "02_CONTEXT_AND_TRACEABILITY/REQUIREMENT_TRACEABILITY.md",
-      "sha256": "7ff1c7896bf3cd6d343e23e524070383dba858a9779493549d98748869db852e",
-      "bytes": 14466
+      "sha256": "d0006efcf8d2c2156186acb3bc07c2ce03735e39ceb3bc85a7c64b0e13384227",
+      "bytes": 14727
     },
     {
       "path": "03_IMPLEMENTATION_FOUNDATION/prior_foundation/MANIFEST.json",

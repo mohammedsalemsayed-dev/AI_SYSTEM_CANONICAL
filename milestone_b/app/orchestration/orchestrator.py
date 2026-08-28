@@ -1010,10 +1010,17 @@ class Orchestrator:
 
         snap = self.hardware.sample()
         mode = decide(snap, progress_good=progress_good)
-        if mode != "NORMAL":
+        src = getattr(snap, "source", "static")
+        # log on any non-NORMAL mode, or whenever the reading is live (so the
+        # health strip has real numbers even on a healthy machine)
+        if mode != "NORMAL" or src.startswith("live"):
             self.log.append(
                 task_id, EventKind.HARDWARE,
-                {"mode": mode, "source": getattr(snap, "source", "static")},
+                {"mode": mode, "source": src,
+                 "ram_percent": snap.ram_percent, "cpu_percent": snap.cpu_percent,
+                 "disk_free_percent": snap.disk_free_percent,
+                 "gpu_temp_c": snap.gpu_temp_c, "gpu_percent": snap.gpu_percent,
+                 "vram_percent": snap.vram_percent},
             )
         return mode
 
@@ -1025,10 +1032,25 @@ class Orchestrator:
         ]
 
     def _route_and_check_hardware(self, task_id, contract) -> bool | None:
-        """Pick a provider for the task and record a ROUTE event. Returns False
-        when the hardware mode says pause (caller finishes into WAITING_FOR_USER),
-        otherwise None."""
+        """Sample the hardware mode (pausing on EMERGENCY) and, if a Router is
+        wired, pick a provider and record a ROUTE event. Returns False when the
+        hardware mode says pause (caller finishes into WAITING_FOR_USER), else None."""
+        # Milestone R — hardware sampling is independent of routing: a live
+        # monitor logs a real snapshot every task, and an EMERGENCY pauses even
+        # with no Router wired.
+        from app.services.hardware.modes import should_pause
+
+        mode = self._hardware_mode(task_id)
         if self.router is None:
+            if should_pause(mode):
+                self.log.append(
+                    task_id, EventKind.CLARIFICATION,
+                    {"task_id": task_id,
+                     "questions": [f"hardware mode {mode}. Resume when the machine has cooled?"],
+                     "why": "hardware protection"},
+                )
+                self._transition(task_id, State.WAITING_FOR_USER)
+                return False
             return None
         # Milestone O — let the selection controller decide static vs data-driven
         # for this task_class, gated by the guardrail regression check, and hand
@@ -1044,7 +1066,6 @@ class Orchestrator:
                     reg = lambda: rb.certify(rb.latest())  # noqa: E731 — trivial thunk
             self.selection.promote(contract.task_class, regression_check=reg,
                                    log=self.log, task_id=task_id)
-        mode = self._hardware_mode(task_id)
         risk = getattr(contract, "risk_level", "low")
         decision = self.router.route(
             contract.task_class, "builder",

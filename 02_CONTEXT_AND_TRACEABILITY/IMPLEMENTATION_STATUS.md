@@ -42,7 +42,6 @@ Still requiring real implementation:
 - tool adapter ecosystem;
 - RAG/indexing;
 - document/presentation pipelines;
-- full telemetry and target-machine calibration;
 - WebSocket/event streaming;
 - complete desktop shell integration.
 
@@ -515,3 +514,33 @@ Now real (slice scope):
 
 Deferred: real OS-level `SIGKILL` chaos (the hook stops at the log boundary); disk-full /
 OOM triggers; model-output fuzzing beyond one shape; concurrency/race faults.
+
+## Milestone R — telemetry & target-machine calibration (`milestone_b/`, days 1–10)
+
+435 tests green. All 10 days built. Removes "full telemetry and target-machine calibration"
+from the "still requiring real implementation" list above. See
+`milestone_b/MILESTONE_R_NOTES.md`.
+
+Now real (slice scope):
+- **Live telemetry** — `app/services/hardware/telemetry.py` `read_telemetry()`: real RAM %
+  (Windows `ctypes GlobalMemoryStatusEx` / Linux `/proc/meminfo` / macOS `vm_stat`), CPU %
+  (`getloadavg` / neutral), disk free %, and GPU temp/util/VRAM via a fixed-argv
+  `nvidia-smi` probe (0.5 s timeout). Never raises — degrades to `source="live-degraded"`.
+  Verified live on this host.
+- **Calibration** — `hardware/calibration.py` `calibrate() -> HardwareProfile` (cpu count +
+  50 ms micro-bench score, RAM/disk totals, 4 MiB disk-write bench, GPU block); `persist` /
+  `load` to system memory; `is_stale` at 30 days. `python -m app.services.hardware.calibrate`.
+- **`LiveHardwareMonitor`** — caches `read_telemetry()` for 2 s; drop-in for the static
+  monitor (still the default).
+- **Budget scaling** — `default_budget(task_class, profile=)` scales `wall_clock_s` by the
+  calibrated cpu-bench score (0.5×–3× clamp) + a slow-disk bump; no profile → unchanged.
+- **Orchestrator** — hardware sampling is now independent of routing: a `LiveHardwareMonitor`
+  logs a real `HARDWARE` snapshot every task (health strip shows real numbers); an
+  `EMERGENCY` pauses even with no Router.
+- **Shell** — `system_health` / `GET /api/system` include a `hardware_live` block.
+- **Schema / events** — `+ HardwareProfile`; `HardwareSnapshot` gains `cpu_percent` /
+  `disk_free_percent`; `+ TELEMETRY` event.
+
+Deferred: `psutil` / a cross-platform lib; non-NVIDIA GPU probes; the optional router
+low-VRAM cloud bias (budget half landed, routing half is a follow-up); a background sampler;
+power/battery reads; auto-recalibration scheduling.

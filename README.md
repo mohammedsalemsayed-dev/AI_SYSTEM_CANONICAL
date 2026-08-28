@@ -39,8 +39,9 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 | **O** Automated model selection (§10.2 domain 6) | logistic-regression `WeightSet` fit over routing features + `ModelSelectionController` flipping a `task_class` static↔data-driven, gated by the guardrail regression check and demoted on a canary rollback; `PROVISIONAL_WEIGHTS` is now the fallback. A real fit needs a scored-run corpus (offline fitter built, not run) | **built** |
 | **P** Artifact & version tracking | content-addressed `ArtifactStore` (sha-256 deduped blobs) + per-objective version chain with parent lineage + `diff_versions` + mark-never-delete archival (§11.3); the 4 deliverable paths store diff / research / KB / document artifacts at their own trust; `GET /api/artifacts/{id}` in the shell | **built** |
 | **Q** Fault injection & recovery hardening | `app/services/faults/` wrappers (raise real backend exceptions) + a hard-kill log hook; `tests/fault/` 20 cases + a matrix runner (`FAULT_FINDINGS.md`, 14/14) proving safe-terminal / workspace-untouched / clean-`reconcile()` under 13 induced failure modes; forced the `EgressBroker → EgressError` fix | **built** |
+| **R** Telemetry & target-machine calibration | live `HardwareMonitor` reading real RAM/CPU/disk + `nvidia-smi` GPU/VRAM (stdlib + `ctypes`, never raises); one-time `calibrate()` → `HardwareProfile` persisted to system memory; the profile scales the wall-clock budget; hardware sampling now runs every task independent of routing | **built** |
 
-**423 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION.**
+**435 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION.**
 
 ### Needs an external resource (built, not run here)
 
@@ -57,7 +58,7 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 
 ```bash
 cd milestone_b
-python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 423 green
+python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 435 green
 python -m app.cli.demo                                                          # offline end-to-end
 python -m app.ui.run_ui --db slice.db --port 8770                               # desktop shell -> http://127.0.0.1:8770
 ```

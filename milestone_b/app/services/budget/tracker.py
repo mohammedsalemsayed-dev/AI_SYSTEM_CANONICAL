@@ -29,9 +29,22 @@ _FALLBACK = {"wall_clock_s": 300, "steps": 8, "model_cost_usd": 0.50}
 SOFT = 0.8
 HARD = 1.0
 
+# Milestone R — reference the _DEFAULTS were tuned against; a machine's calibrated
+# cpu_bench_score scales wall_clock_s within this clamp.
+_REF_CPU_SCORE = 1.0
+_WALL_SCALE_CLAMP = (0.5, 3.0)
 
-def default_budget(task_class: str) -> dict[str, float]:
-    return dict(_DEFAULTS.get(task_class, _FALLBACK))
+
+def default_budget(task_class: str, *, profile=None) -> dict[str, float]:
+    b = dict(_DEFAULTS.get(task_class, _FALLBACK))
+    if profile is not None:
+        score = max(getattr(profile, "cpu_bench_score", _REF_CPU_SCORE), 1e-3)
+        scale = min(max(_REF_CPU_SCORE / score, _WALL_SCALE_CLAMP[0]), _WALL_SCALE_CLAMP[1])
+        dw = getattr(profile, "disk_write_mb_s", 0.0)
+        if 0 < dw < 50:  # a slow disk lengthens the wall budget a little more
+            scale *= 1.25
+        b["wall_clock_s"] = round(b["wall_clock_s"] * min(scale, _WALL_SCALE_CLAMP[1]), 0)
+    return b
 
 
 class BudgetTracker:

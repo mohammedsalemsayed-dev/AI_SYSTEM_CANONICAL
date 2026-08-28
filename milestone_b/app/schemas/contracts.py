@@ -425,8 +425,22 @@ class HardwareSnapshot(BaseModel):
     gpu_percent: float = 0.0
     ram_percent: float = 0.0
     vram_percent: float = 0.0
-    source: str = "static"  # "static" until real telemetry lands
+    cpu_percent: float = 0.0
+    disk_free_percent: float = 100.0
+    source: str = "static"  # static | live | live-degraded
     ts: float = Field(default_factory=now_ts)
+
+
+class HardwareProfile(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("hwprof"))
+    platform: str = ""
+    cpu_count: int = 1
+    cpu_bench_score: float = 1.0        # ops in a fixed window / reference
+    ram_total_gb: float = 0.0
+    disk_total_gb: float = 0.0
+    disk_write_mb_s: float = 0.0
+    gpu: dict[str, Any] | None = None   # {present, name, vram_gb}
+    calibrated_ts: float = Field(default_factory=now_ts)
 
 
 # --------------------------------------------------------------------------- #
