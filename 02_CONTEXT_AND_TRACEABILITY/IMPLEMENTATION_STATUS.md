@@ -271,6 +271,17 @@ Now real (slice scope):
   Replaces the prior static mock. Verified live against a seeded DB.
 - **Entrypoint** — `app/ui/run_ui.py` (`--db`, `--port`, `--allow-submit`).
 
-Deferred: Tauri packaging / native window (a wrapper over the same page + API); a framework
-rewrite; SSE poll → push; async submit jobs; live-diff / evidence-graph / experience-browser
-panels (each = one fold + one route).
+**Tauri packaging** (`milestone_b/desktop/`, MILESTONE_H_TAURI_PLAN.md) — scaffolded:
+`app/ui/paths.py` (frozen-aware `web_dir` / `default_db_path`), `app/ui/sidecar_main.py`
+(PyInstaller entry, tested as a subprocess), and a complete Tauri v2 project — `Cargo.toml`,
+`tauri.conf.json`, `capabilities/default.json` (shell-execute scoped to the sidecar only),
+`src/main.rs` (spawn sidecar → TCP-poll → navigate → kill-on-exit), `build_sidecar.py`
+(PyInstaller), `build.py` (one command, fails fast on a missing prerequisite), `gen_icons.py`
++ committed icons, `dist/splash.html`, `README.md`. The Rust side is written to the Tauri v2
+API but **not `cargo build`-verified** here (no Rust toolchain); the Python half is tested.
+`build.py` exits 2 with the missing prerequisites in this environment (asserted).
+
+Deferred: producing the signed native binary (needs Rust + PyInstaller + platform build
+tools + certs); a framework rewrite; SSE poll → push; async submit jobs; auto-update / tray /
+single-instance; live-diff / evidence-graph / experience-browser panels (each = one fold +
+one route).

@@ -17,8 +17,9 @@ from urllib.parse import parse_qs, urlparse
 from app.events.log import EventLog
 from app.ui import readmodels
 from app.ui.events import EventFeed, keepalive_frame, sse_frame
+from app.ui.paths import web_dir
 
-_WEB = Path(__file__).parent / "web"
+_WEB = web_dir()
 _POLL_S = 0.25
 _KEEPALIVE_S = 15.0
 _CONTENT_TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}

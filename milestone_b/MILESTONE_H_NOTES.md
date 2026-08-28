@@ -1,7 +1,8 @@
 # Milestone H notes — what is real, what remains
 
-Status against [../MILESTONE_H_PLAN.md](../MILESTONE_H_PLAN.md). **306 tests green.**
-All 14 days built.
+Status against [../MILESTONE_H_PLAN.md](../MILESTONE_H_PLAN.md) and
+[../MILESTONE_H_TAURI_PLAN.md](../MILESTONE_H_TAURI_PLAN.md). **314 tests green.**
+The shell (14 days) plus the Tauri packaging scaffold are built.
 
 ## Real after Milestone H
 
@@ -15,11 +16,30 @@ All 14 days built.
 | Entrypoint | `app/ui/run_ui.py` | `python -m app.ui.run_ui --db <event.db> [--port 8770] [--allow-submit]`. Serves an existing event-log DB; `--allow-submit` also builds an `Orchestrator` over it (Agent SDK / subscription) and wires the POST route. |
 | Events | none — H only reads the log. |
 
+## Tauri packaging (MILESTONE_H_TAURI_PLAN.md) — scaffolded
+
+| Piece | Module | Notes |
+|---|---|---|
+| Frozen-aware paths | `app/ui/paths.py` | `web_dir()` resolves the frontend from source or a PyInstaller bundle (`sys._MEIPASS`); `default_db_path()` → `<per-user data dir>/nexus/events.db`. `server.py` now uses `web_dir()`. |
+| Sidecar entrypoint | `app/ui/sidecar_main.py` | what PyInstaller freezes into `nexus-server` and Tauri spawns. Same `app.ui.server`, defaults tuned for a frozen app: per-user DB, `NEXUS_PORT`, submit off unless `NEXUS_ALLOW_SUBMIT=1`. Covered by `tests/integration/test_sidecar.py` (runs it as a real subprocess). |
+| Tauri v2 project | `desktop/src-tauri/` | `Cargo.toml`, `tauri.conf.json` (identifier, window `main` on `splash.html`, `bundle.externalBin` = `binaries/nexus-server`, NSIS/MSI/dmg/deb/appimage targets), `build.rs`, `capabilities/default.json` (shell-execute scoped **only** to the sidecar). |
+| Rust shell | `desktop/src-tauri/src/main.rs` | `setup()`: resolve app-data dir → spawn `nexus-server` sidecar with `--db`/`--port` → drain its output to the log → background thread TCP-polls the port (~18 s) then `window.navigate("http://127.0.0.1:8770")`, else stays on `splash.html`. `run()`: `RunEvent::ExitRequested` → `child.kill()`. |
+| Build | `desktop/build_sidecar.py` (PyInstaller → `src-tauri/binaries/nexus-server-<triple>`), `desktop/build.py` (one command: sidecar → `npm ci` → `npm run tauri build`; fails fast with a named missing prerequisite), `desktop/gen_icons.py` (Pillow → committed icon set + `.ico`). |
+| Frontend dist | `desktop/dist/splash.html` — "starting the control plane…" until the sidecar is up. |
+
+**Not `cargo build`-verified here** — this environment has no Rust toolchain, no
+PyInstaller, no global npm packages. `desktop/build.py` correctly exits 2 with the missing
+prerequisites (asserted in `test_sidecar.py::test_build_script_reports_missing_toolchain`).
+The Rust source is written to the Tauri v2 API; the Python half (paths, sidecar, config
+shape) is tested. Producing a signed installer is `install Rust + PyInstaller + platform
+build tools → python desktop/build.py`, plus code-signing certs — the same "needs an external
+resource" boundary as the premise test / benchmark / model seeder / guardrail runner.
+
 ## Not yet real / deferred
 
-- **Not a native app** — H ships a served page, not a Tauri binary. Wrapping `app/ui/web/`
-  in a Tauri (or Electron) shell — native window, tray, auto-update — is a packaging step on
-  top of the exact same page and the exact same API. Called out, not silently dropped.
+- **Native binary not produced here** — the scaffold above is complete; a build host with
+  the toolchain runs `python desktop/build.py`. Code signing, auto-update, tray, and a
+  single-instance guard are additive and deferred (see `desktop/README.md`).
 - **No framework / component library** — the frontend is one hand-written page. It streams,
   renders every panel, and reconnects (the milestone's point); a React/Vite rewrite is
   cosmetic and additive, and would consume the same endpoints unchanged.

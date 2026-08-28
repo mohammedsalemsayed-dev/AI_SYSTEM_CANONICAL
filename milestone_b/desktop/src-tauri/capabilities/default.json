@@ -1,0 +1,31 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "NEXUS shell: spawn the nexus-server sidecar and let the main window navigate to the local API.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "core:window:allow-show",
+    "core:webview:allow-webview-close",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/nexus-server",
+          "sidecar": true,
+          "args": [
+            "--host",
+            { "validator": "\\S+" },
+            "--port",
+            { "validator": "\\d{2,5}" },
+            "--db",
+            { "validator": ".+" }
+          ]
+        }
+      ]
+    },
+    "shell:allow-kill",
+    "shell:allow-stdin-write"
+  ]
+}

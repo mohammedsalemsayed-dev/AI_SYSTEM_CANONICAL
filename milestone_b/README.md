@@ -150,7 +150,14 @@ See [MILESTONE_H_NOTES.md](MILESTONE_H_NOTES.md). All 14 days built.
 
 306 tests green. Dependency-free (stdlib `http.server`, no-build frontend). Run it:
 `python -m app.ui.run_ui --db <event.db> --port 8770` then open `http://127.0.0.1:8770`.
-Tauri packaging is the remaining step.
+
+**Tauri packaging** ([MILESTONE_H_TAURI_PLAN.md](../MILESTONE_H_TAURI_PLAN.md),
+[desktop/README.md](desktop/README.md)) — scaffolded: `app/ui/sidecar_main.py` +
+`app/ui/paths.py` + a complete Tauri v2 project under `desktop/` (`src-tauri/` with
+`main.rs` spawning the Python server as a managed sidecar, `build.py` one-command build,
+generated icons). 314 tests green. The Rust side is written to the v2 API but not
+`cargo build`-verified here — `python desktop/build.py` on a host with Rust + PyInstaller +
+platform build tools produces the installers.
 
 ## Day 10 handoff
 

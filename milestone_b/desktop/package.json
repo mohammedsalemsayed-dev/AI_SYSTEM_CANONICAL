@@ -1,0 +1,15 @@
+{
+  "name": "nexus-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tauri v2 native shell for the NEXUS control plane (drives the Python sidecar)",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icons": "python gen_icons.py"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
