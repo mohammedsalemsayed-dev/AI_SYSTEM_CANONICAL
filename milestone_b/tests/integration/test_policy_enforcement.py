@@ -108,3 +108,57 @@ def test_resume_without_decision_stays_waiting(sample_repo: str) -> None:
     still = orch.resume(paused.task_id)  # no approval arg
     assert still.state == "WAITING_FOR_USER"
     log.close()
+
+
+# --- Milestone V: per-changed-file policy ----------------------- #
+def _perfile_orch(log: EventLog, edits: dict[str, str]):
+    orch = build_orchestrator(
+        log,
+        llm_replies=[interpreter_reply(), planner_reply()],
+        builder_edits=edits,
+        policy=PolicyEngine(),  # DEFAULT risk globs — do NOT match the workspace root
+    )
+    orch.per_file_policy = True
+    return orch
+
+
+def test_per_file_policy_catches_a_risk_class_file_the_step_check_missed(sample_repo: str) -> None:
+    log = EventLog()
+    orch = _perfile_orch(log, {"calc.py": FIXED_CALC, "db/migrations/0002_add.py": "# m\n"})
+    paused = orch.run("fix add", sample_repo)
+    assert paused.state == "WAITING_FOR_USER"
+
+    ev = log.read(paused.task_id)
+    per_file = [e for e in ev if e.kind == EventKind.POLICY_DECISION
+                and e.payload.get("scope") == "per-file"]
+    assert any(e.payload["path"] == "db/migrations/0002_add.py"
+               and e.payload["decision"] == "REQUIRE_APPROVAL" for e in per_file)
+    assert EventKind.ARTIFACT not in [e.kind for e in ev]  # aborted before the artifact
+
+    done = orch.resume(paused.task_id, approval="approve")
+    assert done.state == "COMPLETED" and done.verified is True
+    log.close()
+
+
+def test_per_file_policy_is_silent_for_ordinary_files(sample_repo: str) -> None:
+    log = EventLog()
+    orch = _perfile_orch(log, {"calc.py": FIXED_CALC})
+    r = orch.run("fix add", sample_repo)
+    assert r.state == "COMPLETED"
+    per_file = [e for e in log.read(r.task_id) if e.kind == EventKind.POLICY_DECISION
+                and e.payload.get("scope") == "per-file"]
+    assert per_file and all(e.payload["decision"] == "ALLOW" for e in per_file)
+    log.close()
+
+
+def test_per_file_policy_off_by_default_is_byte_identical(sample_repo: str) -> None:
+    log_a, log_b = EventLog(), EventLog()
+    edits = {"calc.py": FIXED_CALC, "db/migrations/0002_add.py": "# m\n"}
+    off = build_orchestrator(log_a, llm_replies=[interpreter_reply(), planner_reply()],
+                             builder_edits=dict(edits))
+    r = off.run("fix add", sample_repo)
+    assert r.state == "COMPLETED"  # the migration edit sails through — the gap V closes
+    assert not [e for e in log_a.read(r.task_id) if e.kind == EventKind.POLICY_DECISION
+                and e.payload.get("scope") == "per-file"]
+    log_a.close()
+    log_b.close()

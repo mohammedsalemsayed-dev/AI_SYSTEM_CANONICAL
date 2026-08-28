@@ -638,3 +638,30 @@ Now real (slice scope):
 Deferred: an escalation *ladder* for the tool loop (stronger model / critic before the user);
 `ProgressService` patience / `STALLED` classification for tool turns; threshold tuning from
 real transcripts.
+
+## Milestone V — per-changed-file policy checks (`milestone_b/`, days 1–7)
+
+471 tests green. All 7 days built. Closes a real §14.1 gap — the risk-class human-approval
+gate (`*auth*`, `*/migrations/*`, `*secret*`, `*/payments/*`, `*.pem`, …) now applies to the
+**files a build changes**, not just the workspace root the step proposal carried. See
+`milestone_b/MILESTONE_V_NOTES.md`.
+
+The gap: `_run_step` proposes once per step with `arguments={"path": ws}` — the workspace
+root — so `rule_risk_class_needs_approval` never matched a real file, and a `code_edit_local`
+task rewriting `app/auth/login.py` or a DB migration was applied with no `APPROVAL_DECISION`.
+
+Now real (slice scope):
+- **`Orchestrator.per_file_policy: bool = False`** opt-in. Off → `_run_step` byte-identical
+  to Milestone U (a migration edit still sails through — the gap V closes).
+- **`_per_file_policy(...)`** — after the builder runs and **before** the step's artifact is
+  recorded, one `file.write` `ActionProposal` per **relative** path in `out.changed_paths`,
+  each through the **existing** `PolicyEngine.decide` + the step's `CapabilityGrant`. `ALLOW`
+  → a logged `POLICY_DECISION` (`scope="per-file"`, `path`); `REQUIRE_APPROVAL` → `ApprovalPause`
+  keyed to the **step proposal's** `action_id` (so approve/resume clears it); `DENY` (out of
+  scope / tainted / operation-not-granted) → `BuildError`.
+- No new rule, no new gate, no new event kind. Approval stays step-scoped. Deterministic; the
+  flag is config (no persistent state; `reconcile()` unaffected).
+
+Deferred: routing each write through `FsToolAdapter`/`ToolDispatcher` as it happens (needs
+the Builder to *declare* writes); per-file approval granularity; content inspection (secret
+scanning) as a verifier tier; flipping `per_file_policy` on by default.

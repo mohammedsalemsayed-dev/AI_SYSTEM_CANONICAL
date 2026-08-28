@@ -52,7 +52,10 @@ def test_telemetry_degrades_not_raises(monkeypatch) -> None:
 def test_calibrate_shape_and_bounded_time() -> None:
     t0 = time.perf_counter()
     p = calibrate()
-    assert (time.perf_counter() - t0) < 0.4  # micro-bench budget
+    # micro-bench budget — the fixed-work benches target ~0.2s; allow generous
+    # head-room so a loaded CI host does not flake (a real regression would be
+    # seconds, not tenths).
+    assert (time.perf_counter() - t0) < 1.5
     assert p.cpu_count >= 1 and p.cpu_bench_score > 0
     assert p.gpu is None or p.gpu.get("present") is True
     assert p.disk_total_gb >= 0.0

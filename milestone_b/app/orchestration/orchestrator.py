@@ -124,6 +124,7 @@ class Orchestrator:
         self.tools = None  # Milestone S — set to a ToolRegistry to enumerate + dispatch tools
         self._tool_dispatch = None
         self.tool_loop = None  # Milestone T — a ToolLoop (or zero-arg factory) for `ops` tasks
+        self.per_file_policy = False  # Milestone V — re-run the Policy Engine per changed file
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -700,6 +701,20 @@ class Orchestrator:
         out = self.builder.execute(
             task_id=task_id, step=step, contract=contract, workspace=ws
         )
+        if (
+            self.per_file_policy
+            and out.exit_code == 0
+            and not out.error
+            and out.changed_paths
+        ):
+            # Milestone V — the step proposal only carried the workspace root, so
+            # the §14.1 risk-class gate never saw the files. Re-run the *same*
+            # engine + grant once per changed file, before any artifact is
+            # recorded for this step.
+            self._per_file_policy(
+                task_id, contract, step, ws, grant, out.changed_paths,
+                approved_steps, proposal.action_id,
+            )
         artifact = ArtifactVersion(
             task_id=task_id,
             changed_paths=out.changed_paths,
@@ -732,6 +747,51 @@ class Orchestrator:
         if out.error or out.exit_code != 0:
             raise BuildError(out.error or f"builder exited {out.exit_code}")
         return proposal, out
+
+    def _per_file_policy(self, task_id, contract, step, ws, grant, changed_paths,
+                         approved_steps, step_action_id):
+        """Milestone V — one `file.write` ActionProposal per changed file, through
+        the existing PolicyEngine + step grant. ALLOW -> a logged decision;
+        REQUIRE_APPROVAL on a risk-class path -> ApprovalPause (step-scoped, keyed
+        to the step proposal so an approve/resume clears it); DENY -> BuildError.
+        No new rule, no new gate."""
+        needs_approval: list[tuple[str, str]] = []
+        for rel in changed_paths:
+            p = ActionProposal(
+                task_id=task_id,
+                step_id=step.id,
+                operation="file.write",
+                arguments={"path": rel},
+                required_capability="fs.write",
+                workspace_scope=ws,
+                expected_effect=f"write {rel}",
+                idempotency_key=f"{task_id}:{step.id}:{rel}",
+            )
+            d = self.policy.decide(p, contract, grant)
+            self.log.append(
+                task_id, EventKind.POLICY_DECISION,
+                d.model_dump(mode="json") | {"scope": "per-file", "path": rel},
+            )
+            if d.decision == "ALLOW":
+                continue
+            if d.decision == "REQUIRE_APPROVAL":
+                needs_approval.append((rel, d.reason))
+                continue
+            if d.rule == "tainted-side-effect":
+                self.log.append(
+                    task_id, EventKind.TAINT_BLOCKED,
+                    {"action_id": p.action_id, "reason": d.reason, "path": rel},
+                )
+            raise BuildError(
+                f"per-file policy {d.decision} [{d.rule}] on {rel}: {d.reason}"
+            )
+        if needs_approval and step.id not in approved_steps:
+            rels = ", ".join(r for r, _ in needs_approval)
+            raise ApprovalPause(
+                step_action_id, step.id,
+                f"{len(needs_approval)} changed file(s) need approval ({rels}): "
+                f"{needs_approval[0][1]}",
+            )
 
     def _read_test_text(self, workspace_path: str, target: str | None) -> str:
         if not target:

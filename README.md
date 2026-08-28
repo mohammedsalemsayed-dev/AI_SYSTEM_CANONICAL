@@ -43,8 +43,9 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 | **S** Tool adapter framework (§5-C / §10.2 spine) | one `ToolAdapter` Protocol + `ToolRegistry` over the scattered §10.2 tool packages; `manifest_block()` injected at planning + `ToolDispatcher` routing every op through the **existing** Policy Engine + caller `CapabilityGrant` (no new gate); git / fs / net(egress) / engine adapters; manifest `output_trust` stamped on the result so `retrieved_web` is never laundered; a tainted side-effecting op is denied by the existing rule | **built** |
 | **T** Tool-use execution | `ShellToolAdapter` (`shell.exec` through the `SandboxRunner` seam, `tool_output` trust) + `ToolLoop` — the model picks one JSON `{op,args}` per turn, each dispatched through the S spine (= existing Policy Engine + grant), bounded by `max_iters` + a parse budget, deterministic; `ops` is now a first-class flow (`_run_tool_task` on a workspace copy, `TOOL_LOOP` event, `tool_output` transcript artifact, `T0` pass record); a policy-denied op is a transcript turn, not a stop; a tainted context can't run a side-effecting op | **built** |
 | **U** Loop detection for the tool loop | D's `LoopDetector` wired per turn into `ToolLoop` — a repeated no-progress op trips `repeated_action` / `repeated_error` and the loop stops early with `loop_risk`; `_run_tool_task` escalates that to `WAITING_FOR_USER` with a `ClarificationRequest` (mirrors the `_execute` stalled-escalation path) instead of burning the iteration cap and failing silently; a `PROGRESS` summary event; `detect_loops` opt-out; deterministic | **built** |
+| **V** Per-changed-file policy checks | opt-in `per_file_policy` re-runs the existing Policy Engine + step grant once per file in `out.changed_paths`, so the §14.1 risk-class approval gate (`*auth*` / `*/migrations/*` / `*secret*` / `*/payments/*` / `*.pem`) actually fires for the files a build touches — not just the workspace-root step proposal; a risk-class edit → `ApprovalPause` (approve/resume → `COMPLETED`), an out-of-scope / read-only-grant write → `BuildError`; no new rule or gate; off by default → byte-identical | **built** |
 
-**463 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION, behind one §5-C tool-dispatch spine with a bounded, loop-guarded model-driven tool-use loop.**
+**471 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION, behind one §5-C tool-dispatch spine with a bounded, loop-guarded tool-use loop and per-file policy enforcement.**
 
 ### Needs an external resource (built, not run here)
 
@@ -61,7 +62,7 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 
 ```bash
 cd milestone_b
-python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 463 green
+python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 471 green
 python -m app.cli.demo                                                          # offline end-to-end
 python -m app.ui.run_ui --db slice.db --port 8770                               # desktop shell -> http://127.0.0.1:8770
 ```
