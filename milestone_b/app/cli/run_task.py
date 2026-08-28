@@ -58,7 +58,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--critic", action="store_true", help="run a Critic pass before verify")
     parser.add_argument("--apply", action="store_true",
                         help="on COMPLETED+verified, write the diff back to --workspace")
+    parser.add_argument(
+        "--local", action="store_true",
+        help="convenience: Interpreter + Planner (+ Critic) on local:llama3.1:8b, "
+             "Builder stays on agent_sdk (cloud). One local model stays resident "
+             "-- no VRAM swap. Your code/repo listing goes to the local models; "
+             "only the edit step goes to cloud. (A local Builder needs an agentic "
+             "tool-loop around Ollama -- not built yet.)",
+    )
     args = parser.parse_args(argv)
+
+    if args.local:
+        args.interpreter_llm = args.interpreter_llm or "local:llama3.1:8b"
+        args.planner_llm = args.planner_llm or "local:llama3.1:8b"
+        args.critic_llm = args.critic_llm or "local:llama3.1:8b"
 
     workspace = os.path.abspath(args.workspace)
     if not os.path.isdir(workspace):

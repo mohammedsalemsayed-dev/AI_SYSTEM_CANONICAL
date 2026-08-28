@@ -39,12 +39,16 @@ class OllamaLLM:
         timeout_s: float = 300.0,
         num_ctx: int | None = None,
         temperature: float = 0.0,
+        keep_alive: str | None = None,
     ) -> None:
         self.model = model or DEFAULT_MODEL
         self.host = (host or DEFAULT_HOST).rstrip("/")
         self.timeout_s = timeout_s
         self.num_ctx = num_ctx
         self.temperature = temperature
+        # how long Ollama keeps the model in VRAM after a call — a longer value
+        # avoids a cold reload between the Interpreter and Planner calls.
+        self.keep_alive = keep_alive or os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 
     # -- health -------------------------------------------------------- #
     def available(self) -> bool:
@@ -70,6 +74,7 @@ class OllamaLLM:
             "system": system,
             "stream": False,
             "options": options,
+            "keep_alive": self.keep_alive,
         }
         req = urllib.request.Request(
             f"{self.host}/api/generate",
