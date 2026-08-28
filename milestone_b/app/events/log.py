@@ -74,6 +74,7 @@ class EventKind:
     SYNTHESIS = "SYNTHESIS"
     KB = "KB"
     AUTHORING = "AUTHORING"
+    ENGINE = "ENGINE"
 
 
 class Event(BaseModel):

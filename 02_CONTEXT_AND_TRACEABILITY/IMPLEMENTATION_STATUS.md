@@ -412,5 +412,32 @@ Now real (slice scope):
 - **Event kind** — `AUTHORING`.
 
 Deferred: real DOCX/PPTX/PDF renderers behind `Renderer`; a revise loop; templates/themes;
-generated figures. Next §10.2 domains: engine adapters + expert modes (needs J), automated
-model selection (needs G + ≥ 20 verified runs).
+generated figures.
+
+## Milestone N — engine adapters & expert modes (`milestone_b/`, days 1–12)
+
+376 tests green. All 12 days built. Fifth §10.2 capability domain. See
+`milestone_b/MILESTONE_N_NOTES.md`.
+
+Now real (slice scope):
+- **Engine adapters** — `app/services/engines/`: `Godot` / `Unreal` / `Android` / `Generic`.
+  Each: read-only `detect(root) -> 0..1` + an `EngineInfo` (source/asset globs, build & test
+  commands, version hint, conventions). `EngineRegistry.detect()` returns the
+  highest-confidence adapter, generic last, never nothing.
+- **Expert profiles** — per-engine `ExpertProfile` (prompt + do/don't) from the adapters +
+  domain profiles (`systems`, `data-pipeline`, `web-frontend`, `security-review`) selectable
+  by a `"expert: <name>"` constraint/request hint. `render_profile()` → a bounded
+  `EXPERT MODE` block.
+- **Orchestrator** — `orch.engines` opt-in; at `INTERPRETING`, a project detected at
+  confidence ≥ 0.6 (or a forced `"expert:"`) prepends the `EXPERT MODE` block to the
+  Interpreter/Planner context and logs an `ENGINE` event carrying the engine's own
+  `test_cmd`. The command is **data for the Planner, never executed**; a pytest T0 still
+  gates. Engines unset / low-confidence generic → context byte-identical to Milestone M.
+- **Scope** — advisory + additive only: no state-machine, policy, capability, or T-ladder
+  change. Detection does no write and runs no engine binary.
+- **Event kind** — `ENGINE`.
+
+Deferred: engine-toolchain execution (§5-C tier-C sandbox seam — `godot --headless` / UBT /
+`gradlew`); engine-native verification as a T-ladder tier; per-engine repo-intelligence
+parsers; more engines (Unity, Bevy, Xcode, Flutter). Last §10.2 domain: automated model
+selection (needs G + ≥ 20 verified runs).
