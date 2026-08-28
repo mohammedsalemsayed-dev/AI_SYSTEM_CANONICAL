@@ -46,9 +46,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("request")
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--db", default="slice_events.db")
-    parser.add_argument("--llm", default=os.environ.get("SLICE_LLM", "anthropic"))
+    parser.add_argument("--llm", default=os.environ.get("SLICE_LLM", "anthropic"),
+                        help="default provider for every role (agent_sdk | anthropic | local)")
+    parser.add_argument("--interpreter-llm", default=None,
+                        help="override the Interpreter's provider (default: --llm)")
+    parser.add_argument("--planner-llm", default=None,
+                        help="override the Planner's provider (default: --llm)")
+    parser.add_argument("--critic-llm", default=None,
+                        help="override the Critic's provider (default: --llm)")
     parser.add_argument("--builder", default=os.environ.get("SLICE_BUILDER", "agent_sdk"))
     parser.add_argument("--critic", action="store_true", help="run a Critic pass before verify")
+    parser.add_argument("--apply", action="store_true",
+                        help="on COMPLETED+verified, write the diff back to --workspace")
     args = parser.parse_args(argv)
 
     workspace = os.path.abspath(args.workspace)
@@ -61,16 +70,28 @@ def main(argv: list[str] | None = None) -> int:
 
     log = EventLog(args.db)
     try:
-        llm = get_llm(args.llm)
+        # one provider instance per distinct kind (a local server is stateful; a
+        # cloud client is cheap either way)
+        _cache: dict[str, object] = {}
+
+        def _llm(kind: str):
+            return _cache.setdefault(kind, get_llm(kind))
+
+        interp_kind = args.interpreter_llm or args.llm
+        plan_kind = args.planner_llm or args.llm
+        critic_kind = args.critic_llm or args.llm
+        print(f"LLM: interpreter={interp_kind} planner={plan_kind} "
+              f"builder={args.builder}" + (f" critic={critic_kind}" if args.critic else ""))
+
         critic = None
         if args.critic:
             from app.services.agents.critic import Critic
 
-            critic = Critic(get_llm(args.llm))
+            critic = Critic(_llm(critic_kind))
         orch = Orchestrator(
             log,
-            Interpreter(llm),
-            Planner(llm),
+            Interpreter(_llm(interp_kind)),
+            Planner(_llm(plan_kind)),
             get_builder(args.builder),
             VerifierT0(),
             PolicyEngine(),
@@ -80,6 +101,15 @@ def main(argv: list[str] | None = None) -> int:
         print_timeline(log, result.task_id)
         print("\n=== result ===")
         print(result.model_dump_json(indent=2))
+
+        if args.apply:
+            from app.services.build.apply import apply_task_result
+
+            ap = apply_task_result(log, result.task_id, workspace)
+            print(f"\n=== apply === {ap.reason}"
+                  + (f"  ({', '.join(ap.changed_paths)})" if ap.changed_paths else ""))
+            if not ap.applied and result.state == "COMPLETED":
+                return 1
         return 0 if result.state == "COMPLETED" else 1
     finally:
         log.close()

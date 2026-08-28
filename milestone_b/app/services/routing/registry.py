@@ -27,10 +27,11 @@ DEFAULT_PROVIDERS: list[ProviderSpec] = [
         notes="raw Messages API; billed per token; enable explicitly via SLICE_LLM=anthropic",
     ),
     ProviderSpec(
-        id="local-small", provider="local", model="", local=True,
+        id="local-small", provider="local", model="llama3.1:8b", local=True,
         context_window=8_192, quality_prior=0.45, latency_prior_s=3.0,
         cost_prior_usd=0.0, resource_cost=0.35, privacy_score=1.0, available=False,
-        notes="seam: small local model for qa_explain / ops",
+        notes="general local model for qa_explain / ops / interpret (Ollama); "
+              "available=False until probe_local() confirms the server is up",
     ),
     ProviderSpec(
         id="local-coder", provider="local", model="qwen2.5-coder:7b", local=True,
@@ -40,10 +41,11 @@ DEFAULT_PROVIDERS: list[ProviderSpec] = [
               "available=False until probe_local() confirms the server is up",
     ),
     ProviderSpec(
-        id="local-reasoner", provider="local", model="", local=True,
+        id="local-reasoner", provider="local", model="llama3.1:8b", local=True,
         context_window=32_768, quality_prior=0.62, latency_prior_s=10.0,
         cost_prior_usd=0.0, resource_cost=0.7, privacy_score=1.0, available=False,
-        notes="seam: local reasoning model for research synthesis / doc_analysis",
+        notes="general local model for research synthesis / doc_analysis / planning "
+              "(Ollama); available=False until probe_local() confirms the server is up",
     ),
 ]
 

@@ -79,6 +79,7 @@ class EventKind:
     TELEMETRY = "TELEMETRY"
     TOOL = "TOOL"
     TOOL_LOOP = "TOOL_LOOP"
+    APPLIED = "APPLIED"  # a verified diff was written back to the real workspace
 
 
 class Event(BaseModel):
