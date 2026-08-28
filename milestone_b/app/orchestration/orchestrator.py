@@ -238,6 +238,12 @@ class Orchestrator:
             contract, run = self.interpreter.compile(task_id, request_text, listing)
             self.log.append(task_id, EventKind.CONTRACT, contract)
             self.log.append(task_id, EventKind.MODEL_RUN, run)
+            self._msg(
+                task_id, "interpreter", "HANDOFF",
+                claims=[f"objective: {contract.objective}", f"task_class: {contract.task_class}"],
+                assumptions=list(contract.assumptions),
+                requested_action="plan",
+            )
 
             snap = self._snap(task_id)
             if snap.contract is not None and (
@@ -264,6 +270,11 @@ class Orchestrator:
             plan, prun = self.planner.plan(contract, listing)
             self.log.append(task_id, EventKind.PLAN, plan)
             self.log.append(task_id, EventKind.MODEL_RUN, prun)
+            self._msg(
+                task_id, "planner", "HANDOFF",
+                claims=[s.intent for s in plan.steps],
+                requested_action="execute",
+            )
 
             self._transition(task_id, State.EXECUTING)
             return self._execute_verify_settle(
@@ -288,6 +299,11 @@ class Orchestrator:
         try:
             combined_diff = self._execute(
                 task_id, contract, plan, workspace_path, approved_steps
+            )
+            self._msg(
+                task_id, "builder", "HANDOFF",
+                claims=[f"diff: {len(combined_diff.encode('utf-8'))} bytes"],
+                requested_action="verify",
             )
         except ApprovalPause as pause:
             self.log.append(
@@ -355,6 +371,11 @@ class Orchestrator:
             original_workspace=workspace_path,
         )
         self.log.append(task_id, EventKind.VERIFICATION, verification)
+        self._msg(
+            task_id, "verifier", "STATUS",
+            claims=[f"T0 {verification.overall}"],
+            confidence_summary=verification.tier,
+        )
 
         # Milestone E — Critic pass, positioned so it can never false-reject a
         # T0-passing diff (research: over-rejection is the real risk).
@@ -656,6 +677,11 @@ class Orchestrator:
             confidence_summary=f"verdict={report.verdict}",
         )
         return report
+
+    def _msg(self, task_id, sender, intent, **kw) -> None:
+        from app.services.agents.messages import emit_message
+
+        emit_message(self.log, task_id, sender=sender, role=sender, intent=intent, **kw)
 
     def _emit_handoff(self, task_id, report) -> None:
         from app.services.agents.messages import emit_message

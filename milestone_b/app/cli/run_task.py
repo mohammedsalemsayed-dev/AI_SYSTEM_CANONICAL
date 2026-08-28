@@ -26,6 +26,7 @@ from app.llm import get_llm
 _SUMMARY_KEYS = (
     "state", "text", "objective", "overall", "decision", "rule", "token",
     "approved", "reason", "error", "verified",
+    "sender", "intent", "verdict", "effective_class", "between",
 )
 
 

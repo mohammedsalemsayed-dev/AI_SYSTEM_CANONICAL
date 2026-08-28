@@ -85,11 +85,13 @@ def test_critic_findings_feed_a_retry_when_T0_fails(sample_repo: str) -> None:
 
     assert result.state == "COMPLETED"
     assert calls["n"] == 2  # T0 failed, critic findings drove one retry that passed
-    handoff = [
+    critic_handoff = [
         e.payload for e in log.read(result.task_id)
-        if e.kind == EventKind.AGENT_MESSAGE and e.payload["intent"] == "HANDOFF"
+        if e.kind == EventKind.AGENT_MESSAGE
+        and e.payload["sender"] == "critic"
+        and e.payload["intent"] == "HANDOFF"
     ]
-    assert handoff and handoff[0]["requested_action"] == "revise"
+    assert critic_handoff and critic_handoff[0]["requested_action"] == "revise"
     log.close()
 
 
