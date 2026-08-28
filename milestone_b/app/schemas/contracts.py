@@ -372,6 +372,53 @@ class ExperienceRecord(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# routing + hardware (Milestone G; DESIGN_TIGHTENING §7)
+# --------------------------------------------------------------------------- #
+HardwareMode = Literal[
+    "NORMAL", "EFFICIENT", "CONSERVATION", "PROTECTIVE", "EMERGENCY"
+]
+
+
+class ProviderSpec(BaseModel):
+    id: str  # stable routing key, e.g. "agent_sdk" / "local-coder"
+    provider: str  # "agent_sdk" | "anthropic" | "local" | "scripted"
+    model: str = ""
+    local: bool = False
+    context_window: int = 200_000
+    quality_prior: float = 0.5  # 0..1, pre-data estimate
+    latency_prior_s: float = 8.0
+    cost_prior_usd: float = 0.0  # per task; 0 for the subscription path
+    resource_cost: float = 0.0  # 0..1 local machine load
+    privacy_score: float = 0.5  # 0..1, higher = more private (local == 1)
+    available: bool = True
+    notes: str = ""
+
+
+class RouteDecision(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("route"))
+    task_id: str = ""
+    role: str = ""
+    task_class: str = ""
+    provider_id: str = ""
+    reason: str = ""
+    escalated: bool = False
+    data_driven: bool = False
+    explored: bool = False
+    hardware_mode: HardwareMode = "NORMAL"
+    candidates_considered: list[str] = Field(default_factory=list)
+    ts: float = Field(default_factory=now_ts)
+
+
+class HardwareSnapshot(BaseModel):
+    gpu_temp_c: float | None = None
+    gpu_percent: float = 0.0
+    ram_percent: float = 0.0
+    vram_percent: float = 0.0
+    source: str = "static"  # "static" until real telemetry lands
+    ts: float = Field(default_factory=now_ts)
+
+
+# --------------------------------------------------------------------------- #
 # contract gate (leave INTERPRETING)
 # --------------------------------------------------------------------------- #
 _T0_PYTEST_RE = re.compile(r"pytest\s+\S+", re.IGNORECASE)

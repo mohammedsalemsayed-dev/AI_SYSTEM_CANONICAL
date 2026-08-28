@@ -60,6 +60,9 @@ class EventKind:
     EXPERIENCE = "EXPERIENCE"
     EXPERIENCE_TRANSITION = "EXPERIENCE_TRANSITION"
 
+    ROUTE = "ROUTE"
+    HARDWARE = "HARDWARE"
+
 
 class Event(BaseModel):
     seq: int = 0

@@ -187,3 +187,34 @@ Deferred: embedding / vector retrieval (CD-rag); the real held-out offline-eval 
 (Milestone I); benchmark rows in system memory (Milestone G); shadow-replay in practice may
 never reach 5 matching tasks on a single-user machine — `CANDIDATE` is an acceptable
 terminal state and experiences stay advisory regardless.
+
+## Milestone G — routing and hardware (`milestone_b/`, days 1–14)
+
+271 tests green. All 14 days built. See `milestone_b/MILESTONE_G_NOTES.md`.
+
+Now real (slice scope):
+- **Provider registry** — `ProviderSpec` + `ProviderRegistry`; default seed has `agent_sdk`
+  (subscription, cloud, the only `available` entry), `anthropic` (billed, opt-in), and three
+  local tiers declared `available=False` (the local backend adapter is a named seam).
+- **Static routing table (§7.1)** — one `RoutePolicy` per `task_class` + `escalation_reason()`
+  predicates for the "escalate to cloud when …" column; `planning_arch` is always cloud.
+- **Routing stats (§7.2)** — `RouteStatsStore` over the system memory tier; a run is scored
+  only with a T1+ verification link; trailing 90 d / last 50; a model is eligible for a class
+  at ≥ 20 scored runs.
+- **Router** — static default → escalation / hardware-local override → data-driven score
+  (`PROVISIONAL_WEIGHTS`, tagged; displaces the static pick only past a stability margin) →
+  ε = 0.15 seeded exploration below eligibility.
+- **Hardware modes** — `NORMAL…EMERGENCY` policy (`decide()`), a static-snapshot monitor seam;
+  the router pauses on EMERGENCY and biases local on CONSERVATION+.
+- **`stronger_model` ladder rung made real** — re-routes a stalled task to the best untried
+  cloud provider and drives a re-plan; non-actionable on the default single-cloud registry.
+- **Orchestrator wiring** — `router` / `route_stats` / `hardware` opt-in; `ROUTE` + `HARDWARE`
+  events; `MODEL_RUN`s tagged and ingested on a verified completion; a fresh `Orchestrator`
+  over the same system memory reuses the accumulated stats. Router unset → unchanged.
+- **Offline eligibility seeder** — `tests/benchmark/seed_model.py` (not run; needs the
+  subscription).
+- **Event kinds** — `ROUTE`, `HARDWARE`.
+
+Deferred: local model backend adapters (registry rows exist, unavailable); per-task role-LLM
+swap from the chosen `ProviderSpec`; real hardware telemetry; logistic-regression weight fit
++ canary (Milestone I).

@@ -25,8 +25,8 @@ plus the records added in [DESIGN_TIGHTENING.md](../DESIGN_TIGHTENING.md) §3
 
 | Requirement domain | Authoritative source | Architecture target | Contracts touched | Milestone (§10) | Acceptance category | Status |
 |---|---|---|---|---|---|---|
-| Hybrid local/cloud workstation | Complete Spec §§1–4 | Router / provider abstraction | `RunPlan`, `ModelRunRecord` | G (static table until B produces data) | Benchmark, Integration | FOUNDATION |
-| 8 GB VRAM-aware operation | Complete Spec hardware/routing | Hardware scheduler / modes | `HardwareSnapshot`, `RunPlan` | G | Resource | FOUNDATION |
+| Hybrid local/cloud workstation | Complete Spec §§1–4 | Router / provider abstraction | `ProviderSpec`, `RouteDecision`, `ModelRunRecord` | G (static table until B produces data) | Benchmark, Integration | FOUNDATION (slice: provider registry + static §7.1 table + escalation triggers + data-driven blend once eligible + ε-exploration; local backend adapter is a named seam) |
+| 8 GB VRAM-aware operation | Complete Spec hardware/routing | Hardware scheduler / modes | `HardwareSnapshot`, `HardwareMode` | G | Resource | FOUNDATION (slice: `NORMAL…EMERGENCY` mode policy + monitor seam; router pauses on EMERGENCY, biases local on CONSERVATION+; real telemetry deferred) |
 | Specialized independent agents | Complete Spec agent/decision sections | Orchestrator + role contracts | `AgentMessage`, `CriticReport`, `RolePerformance` | E | Integration, Failure | FOUNDATION (slice: Critic + independent T2 ensemble + Researcher + structured AgentMessage + composition rule) |
 | Intent / prompt compilation | Complete Spec §8 / D14 | Interpreter + immutable request | `OriginalRequest`, `TaskContract` | B | Unit, Integration | FOUNDATION (slice: Interpreter + no-verifiable-T0 guard) |
 | Meaningful progress / loop detection | D3 / D4 / contracts + DESIGN_TIGHTENING §14.4 | Progress observer + loop detector | `ProgressEvent`, `Observation` | D | Unit, Failure, Recovery | FOUNDATION (slice: 6 hard signals + novel-motion guard + structural loop detector + escalation ladder) |
@@ -47,8 +47,8 @@ plus the records added in [DESIGN_TIGHTENING.md](../DESIGN_TIGHTENING.md) §3
 | Presentation generation | product requirements | presentation pipeline | `ArtifactVersion` (`task_class=authoring`) | CD-pptx (after F) | Integration | NOT YET IMPLEMENTED |
 | Futuristic desktop UI | D10 / UI | Tauri / React app | event-log derived views (§11.2) | H (parallel from B) | Integration | FOUNDATION |
 | Agent questions / ambiguity | D11 | `WAITING_FOR_USER` protocol | `ClarificationRequest`, `TaskContract.ambiguity` | B | Unit, Integration | FOUNDATION |
-| Hardware / power protection | D15 | telemetry / admission modes | `HardwareSnapshot` | G | Resource | FOUNDATION ONLY |
-| Model benchmarking | D17 | benchmark DB / evaluator / router | `ModelRunRecord` ↔ `VerificationRecord` | G | Benchmark | NOT YET IMPLEMENTED |
+| Hardware / power protection | D15 | telemetry / admission modes | `HardwareSnapshot`, `HardwareMode` | G | Resource | FOUNDATION (slice: mode policy + `EMERGENCY` pause + local bias wired into the router; monitor is a static-snapshot seam) |
+| Model benchmarking | D17 | benchmark DB / evaluator / router | `ModelRunRecord` ↔ `VerificationRecord` | G | Benchmark | FOUNDATION (slice: `RouteStatsStore` in system memory, T1+-only scoring, windowed aggregates + ≥ 20-run eligibility feeding the data-driven router; offline `seed_model.py` seeder built, not run) |
 | Controlled self-improvement | architecture roadmap | offline evaluation / canary / regression | `ExperienceRecord.guardrail_result` | I | Benchmark, Failure | NOT YET IMPLEMENTED |
 | Test gates | acceptance strategy | unit / integration / failure / security / recovery / resource / benchmark | `VerificationRecord` (tiers T0–T3) | A → I (all) | all | FOUNDATION ONLY |
 | End-to-end independent verification | Complete Spec completion + DESIGN_TIGHTENING §5 | Verification ladder T0–T3 | `VerificationRecord` | B (T0), E (T2 ensemble) | Integration, Security | FOUNDATION (slice: T0 deterministic + T2 model ensemble, advisory; disagreement protocol) |

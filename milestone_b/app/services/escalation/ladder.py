@@ -3,8 +3,9 @@
     inspect -> change_strategy -> critic -> research -> stronger_model -> ask_user
 
 Milestone D implements `inspect` (diagnose + log), `change_strategy` (force a
-re-plan, bounded), and `ask_user` (pause). `critic` / `research` /
-`stronger_model` are stubs that log and advance — Milestones E and G fill them.
+re-plan, bounded), and `ask_user` (pause). Milestone E fills `critic` / `research`
+(actionable when the role is wired); Milestone G fills `stronger_model`
+(actionable when a `Router` with an untried stronger provider is wired).
 The orchestrator calls `advance()` repeatedly on a STALLED / LOOP_RISK step until
 it gets an action it can carry out.
 """
@@ -29,12 +30,14 @@ class Ladder:
         *,
         has_critic: bool = False,
         has_researcher: bool = False,
+        has_stronger_model: bool = False,
     ) -> None:
         self._i = 0
         self.max_replans = max_replans
         self.replans_used = 0
         self.has_critic = has_critic
         self.has_researcher = has_researcher
+        self.has_stronger_model = has_stronger_model
 
     @property
     def current(self) -> str:
@@ -55,6 +58,8 @@ class Ladder:
             return Rung("critic", actionable=self.has_critic)
         if name == "research":
             return Rung("research", actionable=self.has_researcher)
+        if name == "stronger_model":
+            return Rung("stronger_model", actionable=self.has_stronger_model)
         if name == "ask_user":
             return Rung("ask_user", actionable=True)
         return Rung(name, actionable=False)

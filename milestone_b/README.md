@@ -97,6 +97,25 @@ See [MILESTONE_F_NOTES.md](MILESTONE_F_NOTES.md). All 14 days built.
 `orch.experience = ExperienceStore()`; `RolePerformanceStore(memory=orch.memory)` for
 cross-run role performance.
 
+### Milestone G ([../MILESTONE_G_PLAN.md](../MILESTONE_G_PLAN.md)) — routing and hardware
+
+See [MILESTONE_G_NOTES.md](MILESTONE_G_NOTES.md). All 14 days built.
+
+| Days | Deliverable | State |
+|---|---|---|
+| 1–2 | `routing/registry.py` (`ProviderSpec`) + `routing/table.py` (static §7.1 + triggers) | **done** |
+| 3–4 | `hardware/modes.py` + `hardware/monitor.py` (static-snapshot seam) | **done** |
+| 5–6 | `routing/stats.py` — `RouteStatsStore` over system memory; T1+-only scoring; eligibility | **done** |
+| 7–8 | `routing/router.py` — static → data-driven blend + ε exploration | **done** |
+| 9–10 | orchestrator wiring — `ROUTE`/`HARDWARE` events; stats ingest; cross-run persistence | **done** |
+| 11–12 | `stronger_model` ladder rung made real; `EMERGENCY` → pause | **done** |
+| 13 | `tests/benchmark/seed_model.py` (offline eligibility seeder) | **built; not run (needs subscription)** |
+| 14 | regression + notes + status/index | **done** |
+
+271 tests green. Routing is opt-in: `orch.router = Router()`,
+`orch.hardware = HardwareMonitor()`; `RouteStatsStore` auto-builds from `orch.memory`.
+Seed a new model offline: `python -m tests.benchmark.seed_model agent_sdk tests/premise/tasks.seeded.json`
+
 ## Day 10 handoff
 
 The premise test needs real providers:
@@ -162,7 +181,9 @@ tests/
 
 | Seam | File | Filled in |
 |---|---|---|
-| Model router / local tier | hardcoded provider; `get_llm` | Milestone G / §7 |
+| Model router | `services/routing/` — **real** (registry + static §7.1 table + stats + data-driven blend + `stronger_model` rung) | local backend adapter + per-task role-LLM swap |
+| Local model tier | registry rows declared `available=False` | llama.cpp / Ollama adapter behind the registry |
+| Hardware telemetry | `services/hardware/` — **real** policy + `EMERGENCY` pause; monitor is a static-snapshot seam | real GPU temp / VRAM / power sampling |
 | Sandbox tiers | `workspace_copy` temp dir | §14.6, Milestone C day 7–9 (blocked on backend) |
 | Policy engine | `services/policy/engine.py` — **real** (7 ordered rules) | hardening in later milestones |
 | Capability issuance | `services/capability/` — **real** (registry + scoped grants) | granular per-op proposals in Milestone E |

@@ -111,6 +111,9 @@ class Orchestrator:
         self.role_perf = None  # Milestone E — RolePerformanceStore for shadow metrics
         self.memory = None  # Milestone F — set to a MemoryStore to enable context
         self.experience = None  # Milestone F — set to an ExperienceStore
+        self.router = None  # Milestone G — set to a Router to enable provider routing
+        self.route_stats = None  # Milestone G — RouteStatsStore; auto-built from memory
+        self.hardware = None  # Milestone G — set to a HardwareMonitor for mode policy
 
     def _step_runner(self):
         if self._runner is None:
@@ -276,6 +279,10 @@ class Orchestrator:
                 )
 
             self._transition(task_id, State.PLANNING)
+            if self._route_and_check_hardware(task_id, contract) is False:
+                return self._finish(
+                    task_id, "paused: hardware protection", state=State.WAITING_FOR_USER
+                )
             self._experience_advice(task_id, contract)
             plan, prun = self.planner.plan(contract, listing)
             self.log.append(task_id, EventKind.PLAN, plan)
@@ -436,6 +443,7 @@ class Orchestrator:
             self._transition(task_id, State.COMPLETED)
             self._remember_completion(task_id, contract, combined_diff, verification)
             self._capture_experience(task_id, contract, verification)
+            self._ingest_route_stats(task_id, contract, verification)
             return self._finish(
                 task_id, "completed", state=State.COMPLETED,
                 verified=True, verification_ref=verification.id,
@@ -519,6 +527,7 @@ class Orchestrator:
         ladder = Ladder(
             has_critic=self.critic is not None,
             has_researcher=self.researcher is not None,
+            has_stronger_model=self.router is not None,
         )
         budget = BudgetTracker(contract.budget, contract.task_class)
         soft_warned = False
@@ -821,6 +830,94 @@ class Orchestrator:
             )
         return hit
 
+    # ------------------------------------------------------------------ #
+    # Milestone G — routing + hardware
+    # ------------------------------------------------------------------ #
+    def _hardware_mode(self, task_id, *, progress_good: bool = True) -> str:
+        if self.hardware is None:
+            return "NORMAL"
+        from app.services.hardware.modes import decide
+
+        snap = self.hardware.sample()
+        mode = decide(snap, progress_good=progress_good)
+        if mode != "NORMAL":
+            self.log.append(
+                task_id, EventKind.HARDWARE,
+                {"mode": mode, "source": getattr(snap, "source", "static")},
+            )
+        return mode
+
+    def _tried_providers(self, task_id) -> list[str]:
+        return [
+            e.payload.get("provider_id", "")
+            for e in self.log.read(task_id)
+            if e.kind == EventKind.ROUTE and e.payload.get("provider_id")
+        ]
+
+    def _route_and_check_hardware(self, task_id, contract) -> bool | None:
+        """Pick a provider for the task and record a ROUTE event. Returns False
+        when the hardware mode says pause (caller finishes into WAITING_FOR_USER),
+        otherwise None."""
+        if self.router is None:
+            return None
+        mode = self._hardware_mode(task_id)
+        risk = getattr(contract, "risk_level", "low")
+        decision = self.router.route(
+            contract.task_class, "builder",
+            task_id=task_id, hardware_mode=mode, risk_level=risk,
+        )
+        self.log.append(task_id, EventKind.ROUTE, decision.model_dump(mode="json"))
+        if not decision.provider_id:
+            self.log.append(
+                task_id, EventKind.CLARIFICATION,
+                {"task_id": task_id,
+                 "questions": [f"{decision.reason}. Resume when the machine has cooled?"],
+                 "why": "hardware protection"},
+            )
+            self._transition(task_id, State.WAITING_FOR_USER)
+            return False
+        return None
+
+    def _ingest_route_stats(self, task_id, contract, verification) -> None:
+        if self.router is None or self.memory is None:
+            return
+        if self.route_stats is None:
+            from app.services.routing.stats import RouteStatsStore
+
+            self.route_stats = RouteStatsStore(self.memory)
+        chosen = (self._tried_providers(task_id) or [""])[-1]
+        spec = self.router.registry.get(chosen) if chosen else None
+        from app.schemas.contracts import ModelRunRecord
+
+        for e in self.log.read(task_id):
+            if e.kind != EventKind.MODEL_RUN:
+                continue
+            run = ModelRunRecord.model_validate(e.payload)
+            if not run.provider and spec is not None:
+                run.provider, run.model = spec.provider, (spec.model or spec.id)
+            self.route_stats.ingest(
+                run, task_class=contract.task_class,
+                verification_tier=verification.tier,
+                verification_pass=(verification.overall == "pass"),
+            )
+
+    def _stronger_model_route(self, task_id, contract) -> "object | None":
+        """The `stronger_model` ladder rung: re-route to the best untried eligible
+        cloud provider. Returns a RouteDecision if one is available, else None."""
+        if self.router is None:
+            return None
+        tried = self._tried_providers(task_id)
+        decision = self.router.route(
+            contract.task_class, "builder", task_id=task_id,
+            attempt=99, tried=tried, user_requested_cloud=True,
+        )
+        if not decision.provider_id or decision.provider_id in tried:
+            return None
+        decision.escalated = True
+        decision.reason = f"stronger_model rung: {decision.reason}"
+        self.log.append(task_id, EventKind.ROUTE, decision.model_dump(mode="json"))
+        return decision
+
     def _emit_composition(self, task_id, contract) -> None:
         from app.services.agents.composition import select_roles
 
@@ -945,6 +1042,15 @@ class Orchestrator:
             if rung.name == "research" and self.researcher is not None:
                 research_note = self._do_research(task_id, contract, reason, tried)
                 continue  # research informs the next re-plan
+            if rung.name == "stronger_model":
+                decision = self._stronger_model_route(task_id, contract)
+                if decision is None:
+                    continue  # no untried stronger provider -> advance to ask_user
+                return self._replan(
+                    task_id, contract, workspace_path, reason, tried,
+                    extra=f"- escalated to a stronger model: {decision.provider_id} "
+                    f"({decision.reason}); take a materially different approach",
+                )
             if rung.name == "change_strategy":
                 return self._replan(
                     task_id, contract, workspace_path, reason, tried, extra=research_note
