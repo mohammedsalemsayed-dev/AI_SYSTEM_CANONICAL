@@ -16,7 +16,11 @@ _DEFAULT_TIMEOUT_S = 15
 
 
 class EgressDenied(RuntimeError):
-    pass
+    """The URL is not on the allowlist (policy)."""
+
+
+class EgressError(RuntimeError):
+    """The fetch was allowed but the transport failed (timeout, reset, DNS…)."""
 
 
 @dataclass
@@ -60,6 +64,10 @@ class EgressBroker:
             raise EgressDenied(
                 f"egress to {url!r} denied: host not in allowlist {self._norm()}"
             )
-        content = self.opener(url, self.timeout_s)
+        try:
+            content = self.opener(url, self.timeout_s)
+        except Exception as exc:  # noqa: BLE001 — any transport failure -> a clean typed error
+            self.blocked.append(url)
+            raise EgressError(f"egress to {url!r} failed: {exc!r}") from exc
         self.fetched.append(url)
         return EgressResult(url=url, content=content, trust="retrieved_web")

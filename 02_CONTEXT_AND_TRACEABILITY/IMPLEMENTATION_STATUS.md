@@ -44,8 +44,7 @@ Still requiring real implementation:
 - document/presentation pipelines;
 - full telemetry and target-machine calibration;
 - WebSocket/event streaming;
-- complete desktop shell integration;
-- comprehensive test gates and fault injection.
+- complete desktop shell integration.
 
 A coding agent must not "simplify away" these items because they are absent from the initial scaffold.
 
@@ -492,3 +491,27 @@ Now real (slice scope):
 
 Deferred: filesystem materialisation (explicit `fs.write` step); binary artifact kinds (with
 real Milestone M renderers); a UI artifact viewer; automatic archive-tier migration.
+
+## Milestone Q — fault injection & recovery hardening (`milestone_b/`, days 1–10)
+
+423 tests green. All 10 days built. Removes "comprehensive test gates and fault injection"
+from the "still requiring real implementation" list above. See
+`milestone_b/MILESTONE_Q_NOTES.md`.
+
+Now real (slice scope):
+- **Fault toolkit** — `app/services/faults/`: `Fault`/`FaultPlan` (13 kinds, `on_call` /
+  `sticky`); `FlakyLLM` / `FlakyRunner` / `FlakyBuilder` / `flaky_opener` raising the actual
+  backend exception classes; `InterruptAfter` (a `BaseException`-based log hook that
+  simulates a hard kill after a targeted event).
+- **Fault suite** — `tests/fault/`: 20 tests (LLM refusal/timeout/garbage, every sandbox
+  failure shape, non-applying / empty diff, builder exception, hard kill after
+  PLAN/CHECKPOINT/ARTIFACT/VERIFICATION, egress flap) each asserting three invariants:
+  safe terminal (a `COMPLETED` always has a passing T0), user workspace byte-identical, clean
+  `reconcile()` + `resume()`. `run_fault_suite.py` → `FAULT_FINDINGS.md` (14/14 matrix PASS).
+- **Hardening the suite forced** — `EgressBroker.fetch` now wraps the opener and raises a
+  typed `EgressError` (allowed URL, transport failed) instead of letting a raw `URLError`
+  crash `ResearchPipeline.run`; `Researcher` catches it and degrades to fewer sources +
+  explicit uncertainty.
+
+Deferred: real OS-level `SIGKILL` chaos (the hook stops at the log boundary); disk-full /
+OOM triggers; model-output fuzzing beyond one shape; concurrency/race faults.

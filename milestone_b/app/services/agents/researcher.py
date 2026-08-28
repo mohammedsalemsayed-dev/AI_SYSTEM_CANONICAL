@@ -13,7 +13,7 @@ from __future__ import annotations
 from app.llm.base import LLM
 from app.llm.parse import parse_json_object
 from app.schemas.contracts import Claim, EvidenceRecord, ModelRunRecord
-from app.services.egress.broker import EgressBroker, EgressDenied
+from app.services.egress.broker import EgressBroker, EgressDenied, EgressError
 
 _QUERY_SYSTEM = """You are the Researcher's query planner. Given a research question, propose
 1-3 specific URLs likely to answer it. Reply with ONLY JSON: {"urls": [string, ...]}.
@@ -54,7 +54,7 @@ class Researcher:
         for url in urls:
             try:
                 result = self.broker.fetch(url)
-            except EgressDenied:
+            except (EgressDenied, EgressError):
                 continue
             text = result.content.decode("utf-8", errors="replace")[:6000]
             ev = EvidenceRecord(
