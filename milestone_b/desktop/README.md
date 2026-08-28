@@ -72,24 +72,29 @@ cd desktop && npm install && npm run tauri dev
 - Readiness: the shell TCP-polls the port ~18 s, then falls back to
   `splash.html`; it is not a crash.
 
-## Build status (2026-08-29)
+## Build status (2026-08-29) — BUILT
 
-- **Sidecar: verified.** `pip install pyinstaller` + `python desktop/build_sidecar.py`
-  produces `src-tauri/binaries/nexus-server-x86_64-pc-windows-msvc.exe` (~31 MB,
-  one-file). Launched standalone (no Python on PATH), it serves `/api/health`,
-  `/api/tasks` (full read-model shape), and the shell HTML on `:8791`. The
-  Python half of the desktop app is packaged and working.
-- **Tauri native window: still needs a build host.** `cargo` is not installed
-  and Tauri's Windows link step needs the MSVC "Desktop development with C++"
-  toolchain. `node` is present. Install Rust (`rustup`) + VS Build Tools, then
-  `python desktop/build.py`.
+Full native build done on this Windows host (Rust 1.98 + MSVC Build Tools 2026 +
+Node 24 + PyInstaller):
+
+```
+NEXUS_0.1.0_x64-setup.exe   (NSIS, ~34 MB)   src-tauri/target/release/bundle/nsis/
+NEXUS_0.1.0_x64_en-US.msi   (WiX,  ~35 MB)   src-tauri/target/release/bundle/msi/
+```
+
+Each installer bundles the Tauri native shell + the frozen `nexus-server`
+sidecar. Verified: launching `target/release/nexus-desktop.exe` spawns the
+sidecar (per-user DB under `%LOCALAPPDATA%\com.nexus.controlplane\`), the server
+is up in ~2 s, `/api/health` and `/api/tasks` respond, and closing the app kills
+the whole process tree.
+
+One scaffold fix was needed: `Cargo.toml` declared `[lib] nexus_desktop_lib`
+with no `src/lib.rs` (Tauri v2 mobile-friendly layout). Split `main.rs` into
+`src/lib.rs` (`pub fn run()`, `#[cfg_attr(mobile, tauri::mobile_entry_point)]`)
++ a thin `src/main.rs`. Also `build.py` now resolves `npm`/`cargo` to their full
+path so `subprocess` finds `npm.cmd` on Windows.
 
 ## Not done here / caveats
-
-- **The Rust side is written to the Tauri v2 API but not `cargo build`-verified
-  in this environment** (no Rust toolchain / MSVC). The Python side — sidecar
-  (now built + run-verified), path resolution, config parsing — is covered by
-  `tests/` and the manual run above.
 - The exact `shell:allow-execute` scope shape has shifted across
   `tauri-plugin-shell` point releases; verify `capabilities/default.json`
   against the version `npm install` resolves.

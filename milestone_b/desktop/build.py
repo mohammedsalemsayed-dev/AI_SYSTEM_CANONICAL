@@ -22,8 +22,14 @@ from pathlib import Path
 HERE = Path(__file__).parent
 
 
+def _resolve(tool: str) -> str | None:
+    """Full path to `tool` — on Windows this also finds npm.cmd / cargo.exe,
+    which bare `subprocess.run(["npm", ...])` cannot."""
+    return shutil.which(tool)
+
+
 def _need(tool: str, hint: str) -> str | None:
-    if shutil.which(tool) is None:
+    if _resolve(tool) is None:
         return f"missing prerequisite: {tool!r} not on PATH — {hint}"
     return None
 
@@ -47,15 +53,17 @@ def main() -> int:
         )
         return 2
 
+    npm = _resolve("npm")
+
     print("== 1/3  building the nexus-server sidecar ==")
     subprocess.run([sys.executable, str(HERE / "build_sidecar.py")], check=True)
 
     print("== 2/3  installing the Tauri CLI ==")
     lock = HERE / "package-lock.json"
-    subprocess.run(["npm", "ci" if lock.is_file() else "install"], check=True, cwd=HERE)
+    subprocess.run([npm, "ci" if lock.is_file() else "install"], check=True, cwd=HERE)
 
     print("== 3/3  bundling the native app ==")
-    subprocess.run(["npm", "run", "tauri", "build"], check=True, cwd=HERE)
+    subprocess.run([npm, "run", "tauri", "build"], check=True, cwd=HERE)
 
     bundle = HERE / "src-tauri" / "target" / "release" / "bundle"
     print(f"\ndone — bundles under {bundle}")
