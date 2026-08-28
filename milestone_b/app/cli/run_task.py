@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.full:
             from app.cli.full_stack import wire_full_stack
 
-            wire_full_stack(orch, db_path=args.db)
+            wire_full_stack(orch, db_path=args.db, workspace=workspace)
         result = orch.run(args.request, workspace)
         print_timeline(log, result.task_id)
         print("\n=== result ===")

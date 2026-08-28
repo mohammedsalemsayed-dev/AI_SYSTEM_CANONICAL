@@ -24,7 +24,8 @@ from pathlib import Path
 
 
 def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slice_events.db",
-                    t2_on_cloud: bool = True, verbose: bool = True) -> list[str]:
+                    workspace: str | None = None, t2_on_cloud: bool = True,
+                    per_file_policy: bool = True, verbose: bool = True) -> list[str]:
     """Attach every optional agent to `orch`. Returns a list of what was wired."""
     from app.llm import get_llm
     from app.services.agents.brainstorm import Brainstorm
@@ -39,6 +40,12 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
     from app.services.routing.registry import ProviderRegistry
     from app.services.routing.router import Router
     from app.services.routing.stats import RouteStatsStore
+    from app.services.tools.adapters.egress_tool import EgressToolAdapter
+    from app.services.tools.adapters.engine_tool import EngineToolAdapter
+    from app.services.tools.adapters.fs_tool import FsToolAdapter
+    from app.services.tools.adapters.git_tool import GitToolAdapter
+    from app.services.tools.adapters.shell_tool import ShellToolAdapter
+    from app.services.tools.registry import ToolRegistry
     from app.services.verify.verifier_t2 import VerifierT2
 
     wired: list[str] = []
@@ -92,6 +99,27 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
     orch.researcher = researcher
     orch.research = ResearchPipeline(researcher, lllm)
     wired += ["researcher", "research_pipeline"]
+
+    # --- tool adapter registry (S) — enumerated at planning, policy-gated #
+    treg = (ToolRegistry()
+            .register(FsToolAdapter())
+            .register(ShellToolAdapter())
+            .register(EngineToolAdapter())
+            .register(EgressToolAdapter(EgressBroker(allowlist=[]))))
+    if workspace:
+        from app.services.repo.git_adapter import GitAdapter
+
+        try:
+            treg.register(GitToolAdapter(GitAdapter(workspace)))
+        except Exception:  # noqa: BLE001 — not a git repo / git missing
+            pass
+    orch.tools = treg
+    wired.append("tools(" + ",".join(a.name for a in treg.all()) + ")")
+
+    # --- §14.1 per-changed-file policy gate (V) — ON in the full stack -- #
+    orch.per_file_policy = per_file_policy
+    if per_file_policy:
+        wired.append("per_file_policy")
 
     if verbose:
         print("full stack wired: " + ", ".join(wired))
