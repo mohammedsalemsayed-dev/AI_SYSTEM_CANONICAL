@@ -53,6 +53,7 @@ def test_matching_experience_is_offered_at_planning(sample_repo: str) -> None:
     assert r1.state == "COMPLETED"
     captured = exp.all()[0]
     exp.advance(captured.id, "VALIDATED", note="test hand-promote")
+    exp.advance(captured.id, "PROMOTED", note="test hand-promote")
 
     # task 2 — same task_class + tags, so the signature matches
     orch2 = build_orchestrator(
@@ -77,6 +78,59 @@ def test_matching_experience_is_offered_at_planning(sample_repo: str) -> None:
     assert used.monitoring_metrics.get("trailing_n", 0) >= 1
     exp.close()
     log.close()
+
+
+def test_flag_catastrophic_quarantines_task_experiences(sample_repo: str) -> None:
+    log = EventLog()
+    exp = ExperienceStore()
+
+    orch1 = build_orchestrator(
+        log,
+        llm_replies=[interpreter_reply(), planner_reply()],
+        builder_edits={"calc.py": FIXED_CALC},
+    )
+    orch1.experience = exp
+    orch1.run("fix the add function", sample_repo)
+    captured = exp.all()[0]
+    exp.advance(captured.id, "VALIDATED", note="t")
+    exp.advance(captured.id, "PROMOTED", note="t")
+
+    orch2 = build_orchestrator(
+        log,
+        llm_replies=[interpreter_reply(), planner_reply()],
+        builder_edits={"calc.py": FIXED_CALC},
+    )
+    orch2.experience = exp
+    r2 = orch2.run("fix the add function again", sample_repo)
+
+    hit = orch2.flag_catastrophic(r2.task_id, "verified-success contradiction (test)")
+    assert captured.id in hit
+    assert exp.get(captured.id).validation_state == "QUARANTINED"
+    tr = [e for e in log.read(r2.task_id) if e.kind == EventKind.EXPERIENCE_TRANSITION]
+    assert tr and tr[0].payload["trigger"] == "catastrophic"
+    # quarantined -> no longer retrieved
+    assert exp.retrieve(captured.signature) == []
+    exp.close()
+    log.close()
+
+
+def test_role_performance_persists_across_orchestrators() -> None:
+    from app.services.agents.performance import RolePerformanceStore
+    from app.services.memory.store import MemoryStore
+
+    mem = MemoryStore()
+    s1 = RolePerformanceStore(memory=mem)
+    for _ in range(6):
+        s1.record("critic", "code_edit_local", baseline_pass=False,
+                  with_role_pass=True, defect_caught=True)
+    assert s1.meets_promotion_criterion("critic", "code_edit_local")
+
+    # a fresh store over the same system memory sees the accumulated numbers
+    s2 = RolePerformanceStore(memory=mem)
+    rp = s2.get("critic", "code_edit_local") or s2._get("critic", "code_edit_local")
+    assert rp.samples == 6
+    assert s2.meets_promotion_criterion("critic", "code_edit_local")
+    mem.close()
 
 
 def test_no_experience_store_is_a_no_op(sample_repo: str) -> None:

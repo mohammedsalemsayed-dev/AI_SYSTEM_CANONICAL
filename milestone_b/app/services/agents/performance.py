@@ -16,14 +16,30 @@ SHADOW_WINDOW = 30  # samples before a promote decision is trusted
 
 
 class RolePerformanceStore:
-    def __init__(self) -> None:
+    """Per-`(role, task_class)` shadow outcomes. In-process by default; pass a
+    `MemoryStore` (Milestone F day 13) to persist to system memory so the
+    composition rule reads accumulated performance across runs."""
+
+    def __init__(self, memory=None) -> None:
         self._by_key: dict[tuple[str, str], RolePerformance] = {}
+        self._memory = memory
 
     def _get(self, role: str, task_class: str) -> RolePerformance:
         key = (role, task_class)
         if key not in self._by_key:
-            self._by_key[key] = RolePerformance(role=role, task_class=task_class)
+            hydrated = None
+            if self._memory is not None:
+                payload = self._memory.latest_role_perf(role, task_class)
+                if payload is not None:
+                    hydrated = RolePerformance.model_validate(payload)
+            self._by_key[key] = hydrated or RolePerformance(role=role, task_class=task_class)
         return self._by_key[key]
+
+    def _persist(self, rp: RolePerformance) -> None:
+        if self._memory is not None:
+            self._memory.record_role_perf(
+                rp.role, rp.task_class, rp.model_dump(mode="json")
+            )
 
     def record(
         self,
@@ -42,6 +58,7 @@ class RolePerformanceStore:
         rp.rework_delta = (rp.rework_delta * n + rework_delta) / (n + 1)
         rp.defects_caught += int(defect_caught)
         rp.samples = n + 1
+        self._persist(rp)
         return rp
 
     def get(self, role: str, task_class: str) -> RolePerformance | None:

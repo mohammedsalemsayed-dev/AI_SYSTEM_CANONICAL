@@ -143,3 +143,47 @@ Now real (slice scope):
 
 Deferred: dedicated `research_web` orchestration (CD-research); real live egress fetch;
 persistent RolePerformance (Milestone F); stronger-model ladder rung (Milestone G).
+
+## Milestone F — memory and experience (`milestone_b/`, days 1–14)
+
+254 tests green. All 14 days built. See `milestone_b/MILESTONE_F_NOTES.md`.
+
+Now real (slice scope):
+- **Hierarchical memory** — `app/services/memory/store.py` SQLite `memory` table
+  (`working` / `project` / `experience` / `system` tiers); append-mostly, supersession by
+  id, no deletion. `retrieve()` is keyword + recency + tier + **trust-filtered**
+  (`trust_min="workspace"` never returns `retrieved_web` / `doc_input`); never returns
+  `QUARANTINED` experience, `STALE` only when flagged.
+- **Context builder** — `memory/context.py` `build_context()` assembles the
+  Interpreter/Planner working context (active decisions / constraints / open questions /
+  artifact index / scoped retrieval hits), replacing the empty `ProjectMemory`. A
+  superseded decision drops out of later context. `MEMORY` events on read and write.
+- **Situation signature** — `experience/signature.py` `{task_class, sorted salient tags,
+  tool set}`; retrieval matches on class + tag overlap (the §14.7 similarity idea without
+  embeddings). Stable for the same contract.
+- **Experience lifecycle** — `experience/lifecycle.py` `OBSERVED → CANDIDATE → VALIDATED →
+  PROMOTED → MONITORED → STALE / QUARANTINED` as an `ALLOWED` map + one numeric §8 gate per
+  transition. `experience/store.py` `ExperienceStore` (SQLite): `capture()` on a T0-pass
+  completion → `OBSERVED`, auto-`CANDIDATE` if the `(signature, strategy)` pair is new;
+  `try_validate()` (shadow-replay gate), `try_promote()` (stub offline eval + security
+  human-approval branch, auto-`MONITORED`), `record_use()` / `sweep_stale()` /
+  auto-quarantine.
+- **Stub offline eval** — `experience/eval.py`: `GUARDRAIL_SET` fixture, deterministic
+  `run_offline_eval`, `promote_decision` folding the §8 numeric gate with the
+  security/policy/execution-scope human-approval branch. Real held-out harness is Milestone I.
+- **Orchestrator wiring** — `_experience_advice()` retrieves matching `PROMOTED` / `MONITORED`
+  experiences at PLANNING and emits an advisory `AgentMessage(sender="experience",
+  intent="PROPOSAL")`; the Planner still writes a fresh plan. `_capture_experience()` on a
+  T0-pass completion. `flag_catastrophic()` — automatic experience rollback (`any →
+  QUARANTINED`, no debounce) on a narrow signal set; auto-fires when T2 contradicts a
+  T0-passing result.
+- **Persistent RolePerformance** — `RolePerformanceStore(memory=…)` persists per
+  `(role, task_class)` to system memory (`MemoryStore.record_role_perf` /
+  `latest_role_perf`); a fresh store over the same DB hydrates the accumulated numbers, so
+  the composition rule reads performance across runs.
+- **Event kinds** — `MEMORY`, `EXPERIENCE`, `EXPERIENCE_TRANSITION`.
+
+Deferred: embedding / vector retrieval (CD-rag); the real held-out offline-eval harness
+(Milestone I); benchmark rows in system memory (Milestone G); shadow-replay in practice may
+never reach 5 matching tasks on a single-user machine — `CANDIDATE` is an acceptable
+terminal state and experiences stay advisory regardless.

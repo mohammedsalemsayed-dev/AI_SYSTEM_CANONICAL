@@ -126,3 +126,65 @@ def test_record_use_quarantines_on_bad_streak() -> None:
         e = st.record_use(e.id, verified=False)
     assert e.validation_state == "QUARANTINED"
     st.close()
+
+
+# --- days 9-10: offline eval + validate/promote/sweep ----------- #
+def _shadow(st: ExperienceStore, exp_id: str, *, n=5, ok=5) -> None:
+    for i in range(n):
+        st.add_shadow_result(exp_id, verified=(i < ok), cost_ratio=1.0, week=i + 1)
+
+
+def test_try_validate_respects_shadow_gate() -> None:
+    st = ExperienceStore()
+    e = st.capture(signature="code_edit_local|tags=off-by-one|tools=builder", strategy="guard",
+                   actions=[], evidence_refs=[], success_score=1.0, verify_tier="T0")
+    _, ok, _ = st.try_validate(e.id)
+    assert not ok  # no shadow tasks yet
+    _shadow(st, e.id, n=5, ok=3)  # 60% < 80%
+    _, ok, why = st.try_validate(e.id)
+    assert not ok and "success" in why
+    _shadow(st, e.id, n=5, ok=5)  # now 8/10 = 80% across weeks 1..5
+    e2, ok, _ = st.try_validate(e.id)
+    assert ok and e2.validation_state == "VALIDATED"
+    st.close()
+
+
+def test_try_promote_needs_human_for_security_strategy() -> None:
+    st = ExperienceStore()
+    e = st.capture(signature="code_edit_local|tags=auth|tools=builder",
+                   strategy="tighten the auth check", actions=["auth.py"],
+                   evidence_refs=[], success_score=1.0, verify_tier="T0")
+    _shadow(st, e.id, n=12, ok=12)
+    st.try_validate(e.id)
+    _, decision = st.try_promote(e.id, human_approved=False)
+    assert decision.needs_human and not decision.ok
+    e2, decision2 = st.try_promote(e.id, human_approved=True)
+    assert decision2.ok and e2.validation_state == "MONITORED"  # auto after PROMOTED
+    st.close()
+
+
+def test_try_promote_plain_strategy_auto_monitors() -> None:
+    st = ExperienceStore()
+    e = st.capture(signature="code_edit_local|tags=off-by-one|tools=builder", strategy="fix range",
+                   actions=["p.py"], evidence_refs=[], success_score=1.0, verify_tier="T0")
+    _shadow(st, e.id, n=12, ok=12)
+    st.try_validate(e.id)
+    e2, decision = st.try_promote(e.id)
+    assert decision.ok and e2.validation_state == "MONITORED"
+    st.close()
+
+
+def test_sweep_stale_moves_low_trailing_success() -> None:
+    st = ExperienceStore()
+    e = st.capture(signature="s", strategy="x", actions=[], evidence_refs=[],
+                   success_score=1.0, verify_tier="T0")
+    st.advance(e.id, "VALIDATED", note="")
+    st.advance(e.id, "PROMOTED", note="")
+    st.advance(e.id, "MONITORED", note="")
+    cur = st.get(e.id)
+    cur.monitoring_metrics = {"trailing_n": 20, "trailing_success": 0.5}
+    st._update(cur)
+    moved = st.sweep_stale()
+    assert [m.id for m in moved] == [e.id]
+    assert st.get(e.id).validation_state == "STALE"
+    st.close()

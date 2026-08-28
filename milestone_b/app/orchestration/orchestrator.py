@@ -791,6 +791,36 @@ class Orchestrator:
                 {"id": exp.id, "state": exp.validation_state, "signature": sig},
             )
 
+    def _task_proposed_experiences(self, task_id) -> list[str]:
+        """Experience ids that were surfaced to the Planner for this task."""
+        ids: list[str] = []
+        for e in self.log.read(task_id):
+            if e.kind == EventKind.AGENT_MESSAGE and e.payload.get("sender") == "experience":
+                ids.extend(e.payload.get("evidence_refs", []))
+        return ids
+
+    def flag_catastrophic(self, task_id, reason: str) -> list[str]:
+        """Automatic experience rollback (§8 `any -> QUARANTINED`). Called on a
+        narrow set of signals — security check bypassed, data loss, or a
+        verifier/human contradiction of a claimed success. Every experience that
+        was proposed for this task is quarantined immediately (no debounce);
+        exit is a manual review + re-entry at CANDIDATE."""
+        if self.experience is None:
+            return []
+        hit: list[str] = []
+        for exp_id in dict.fromkeys(self._task_proposed_experiences(task_id)):
+            try:
+                exp = self.experience.record_use(exp_id, verified=False, catastrophic=True)
+            except KeyError:
+                continue
+            hit.append(exp_id)
+            self.log.append(
+                task_id, EventKind.EXPERIENCE_TRANSITION,
+                {"id": exp_id, "state": exp.validation_state,
+                 "trigger": "catastrophic", "reason": reason},
+            )
+        return hit
+
     def _emit_composition(self, task_id, contract) -> None:
         from app.services.agents.composition import select_roles
 
@@ -851,6 +881,12 @@ class Orchestrator:
                     "why": "T0 / T2 verification disagreement",
                 },
             )
+            if t0.overall == "pass" and t2.overall != "pass":
+                # a second verifier contradicting a T0-claimed success is a §8
+                # catastrophic signal — roll back any experience used here
+                self.flag_catastrophic(
+                    task_id, f"T2 contradicted a T0-passing result: {outcome.detail}"
+                )
             return outcome.detail
         return None
 

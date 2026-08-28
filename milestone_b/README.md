@@ -78,6 +78,25 @@ Multi-agent is opt-in: `Orchestrator(..., critic=Critic(llm))`, `orch.verifier_t
 `orch.researcher = Researcher(llm, broker)`. Benchmark to promote the Critic to default:
 `python -m tests.benchmark.run_multiagent_bench tests/premise/tasks.real.json`
 
+### Milestone F ([../MILESTONE_F_PLAN.md](../MILESTONE_F_PLAN.md)) — memory and experience
+
+See [MILESTONE_F_NOTES.md](MILESTONE_F_NOTES.md). All 14 days built.
+
+| Days | Deliverable | State |
+|---|---|---|
+| 1–2 | `memory/store.py` (SQLite, tiers, supersession) + `memory/retrieve.py` (trust-filtered) | **done** |
+| 3–4 | `memory/context.py` `build_context()` wired into interpret + plan | **done** |
+| 5–6 | `experience/signature.py` + `experience/lifecycle.py` (every §8 gate) | **done** |
+| 7–8 | `experience/store.py` capture on COMPLETED → OBSERVED/CANDIDATE; events | **done** |
+| 9–10 | shadow-replay gate + guardrail fixture + stub offline eval + `VALIDATED→PROMOTED` | **done** |
+| 11–12 | advisory retrieval at PLANNING; `MONITORED→STALE` / `any→QUARANTINED` + rollback hook | **done** |
+| 13 | `RolePerformanceStore` persisted to system memory | **done** |
+| 14 | regression + notes + status/index | **done** |
+
+254 tests green. Memory + experience are opt-in: `orch.memory = MemoryStore()`,
+`orch.experience = ExperienceStore()`; `RolePerformanceStore(memory=orch.memory)` for
+cross-run role performance.
+
 ## Day 10 handoff
 
 The premise test needs real providers:
@@ -152,6 +171,6 @@ tests/
 | Approvals | `REQUIRE_APPROVAL` fails closed | Milestone C day 10 |
 | Progress / loop detection | none | Milestone D / §14.4 |
 | Recovery / reconciliation | `resume()` fails cleanly | Milestone D |
-| Experience repository | none | Milestone F / §14.7 |
+| Experience repository | `services/experience/` + `services/memory/` — **real** (memory tiers, trust-filtered retrieval, context builder, full §8 lifecycle, advisory retrieval, catastrophic rollback) | real held-out offline eval in Milestone I; vector retrieval in CD-rag |
 | Multi-agent (critic, verifier ensemble) | single builder + deterministic T0 | Milestone E / §9 |
 | Verification T1–T3 | T0 only | §5, §14.1 |

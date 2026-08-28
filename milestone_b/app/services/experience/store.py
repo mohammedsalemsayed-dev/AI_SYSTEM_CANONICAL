@@ -13,7 +13,9 @@ from pathlib import Path
 from app.schemas.contracts import ExperienceRecord
 from app.services.experience.lifecycle import (
     can_transition,
+    gate_candidate_to_validated,
     gate_observed_to_candidate,
+    should_go_stale,
     should_quarantine,
 )
 from app.services.experience.signature import signatures_match
@@ -68,7 +70,7 @@ class ExperienceStore:
 
     # -- retrieve ------------------------------------------------- #
     def retrieve(
-        self, signature: str, *, states: tuple[str, ...] = ("PROMOTED", "VALIDATED")
+        self, signature: str, *, states: tuple[str, ...] = ("PROMOTED", "MONITORED")
     ) -> list[ExperienceRecord]:
         out = []
         for exp in self._by_states(states):
@@ -103,6 +105,9 @@ class ExperienceStore:
         q, why = should_quarantine(exp, catastrophic=catastrophic)
         if q and exp.validation_state != "QUARANTINED":
             return self.advance(exp_id, "QUARANTINED", note=why)
+        s, swhy = should_go_stale(exp)
+        if s and exp.validation_state in ("PROMOTED", "MONITORED"):
+            return self.advance(exp_id, "STALE", note=swhy)
         return exp
 
     def add_shadow_result(
@@ -117,6 +122,43 @@ class ExperienceStore:
         )
         self._update(exp)
         return exp
+
+    def try_validate(self, exp_id: str) -> tuple[ExperienceRecord, bool, str]:
+        """CANDIDATE -> VALIDATED if the shadow-replay gate passes."""
+        exp = self.get(exp_id)
+        if exp is None:
+            raise KeyError(exp_id)
+        ok, why = gate_candidate_to_validated(exp)
+        if ok and exp.validation_state == "CANDIDATE":
+            return self.advance(exp_id, "VALIDATED", note=why), True, why
+        return exp, False, why
+
+    def try_promote(
+        self, exp_id: str, *, human_approved: bool = False
+    ) -> tuple[ExperienceRecord, "object"]:
+        """VALIDATED -> PROMOTED -> (auto) MONITORED via the stub offline eval +
+        the security human-approval branch. Returns (record, PromoteDecision)."""
+        from app.services.experience.eval import promote_decision
+
+        exp = self.get(exp_id)
+        if exp is None:
+            raise KeyError(exp_id)
+        decision = promote_decision(exp, human_approved=human_approved)
+        self._update(exp)  # persist heldout_n / guardrail_result folded in by the eval
+        if decision.ok and exp.validation_state == "VALIDATED":
+            exp = self.advance(exp_id, "PROMOTED", note=decision.why)
+            exp = self.advance(exp_id, "MONITORED", note="auto after PROMOTED")
+        return exp, decision
+
+    def sweep_stale(self) -> list[ExperienceRecord]:
+        """Move every MONITORED/PROMOTED experience that meets a §8 stale
+        condition to STALE. Returns the ones moved."""
+        moved = []
+        for exp in self._by_states(("PROMOTED", "MONITORED")):
+            s, why = should_go_stale(exp)
+            if s:
+                moved.append(self.advance(exp.id, "STALE", note=why))
+        return moved
 
     # -- helpers ---------------------------------------------- #
     def get(self, exp_id: str) -> ExperienceRecord | None:
