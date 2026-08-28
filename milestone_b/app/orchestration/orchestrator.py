@@ -125,6 +125,7 @@ class Orchestrator:
         self._tool_dispatch = None
         self.tool_loop = None  # Milestone T — a ToolLoop (or zero-arg factory) for `ops` tasks
         self.per_file_policy = False  # Milestone V — re-run the Policy Engine per changed file
+        self.fallback_builder = None  # local-first: a stronger Builder to retry with once if verification fails
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -349,6 +350,7 @@ class Orchestrator:
         *,
         approved_steps: set[str],
         critic_round: int = 0,
+        builder_round: int = 0,
     ) -> TaskResult:
         try:
             combined_diff = self._execute(
@@ -464,6 +466,7 @@ class Orchestrator:
                 return self._execute_verify_settle(
                     task_id, revised, plan, workspace_path,
                     approved_steps=approved_steps, critic_round=1,
+                    builder_round=builder_round,
                 )
             if verification.overall == "pass" and report.verdict == "reject":
                 # T0 is authoritative — log the disagreement, do not retry
@@ -489,6 +492,36 @@ class Orchestrator:
                 verified=True, verification_ref=verification.id,
                 artifact_ref=self._last_store_id(task_id),
             )
+        # local-first: one bounded retry with a stronger Builder before failing.
+        if self.fallback_builder is not None and builder_round == 0:
+            primary = self.builder
+            self.log.append(
+                task_id, EventKind.ESCALATION,
+                {"reason": "verification failed",
+                 "from_builder": getattr(primary, "name", "?"),
+                 "to_builder": getattr(self.fallback_builder, "name", "?"),
+                 "detail": (verification.residual_uncertainty[:200]
+                            or "local builder did not pass T0")},
+            )
+            self._msg(
+                task_id, "orchestrator", "HANDOFF",
+                claims=[f"local builder ({getattr(primary,'name','?')}) failed T0; "
+                        f"retrying with {getattr(self.fallback_builder,'name','?')}"],
+                requested_action="build",
+            )
+            self._transition(task_id, State.STALLED)
+            self._transition(task_id, State.RECOVERING)
+            self._transition(task_id, State.EXECUTING)
+            self.builder = self.fallback_builder
+            try:
+                return self._execute_verify_settle(
+                    task_id, contract, plan, workspace_path,
+                    approved_steps=approved_steps, critic_round=critic_round,
+                    builder_round=1,
+                )
+            finally:
+                self.builder = primary
+
         self._settle_canaries(task_id, contract, verified=False)
         self._transition(task_id, State.FAILED)
         return self._finish(

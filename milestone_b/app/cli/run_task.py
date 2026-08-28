@@ -67,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--local-builder", action="store_true",
                         help="with --local, run the Builder on local:qwen3:8b (LocalBuilder)")
+    parser.add_argument(
+        "--fallback-builder", default=None,
+        help="if the Builder's diff fails verification, retry ONCE with this "
+             "builder (e.g. agent_sdk). Default: agent_sdk when --local-builder is set.",
+    )
     args = parser.parse_args(argv)
 
     if args.local:
@@ -75,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         args.critic_llm = args.critic_llm or "local:qwen3:8b"
         if args.local_builder and args.builder in ("agent_sdk", None):
             args.builder = "local:qwen3:8b"
+            args.fallback_builder = args.fallback_builder or "agent_sdk"
 
     workspace = os.path.abspath(args.workspace)
     if not os.path.isdir(workspace):
@@ -113,6 +119,9 @@ def main(argv: list[str] | None = None) -> int:
             PolicyEngine(),
             critic=critic,
         )
+        if args.fallback_builder:
+            orch.fallback_builder = get_builder(args.fallback_builder)
+            print(f"     fallback builder: {args.fallback_builder} (on verification failure)")
         result = orch.run(args.request, workspace)
         print_timeline(log, result.task_id)
         print("\n=== result ===")
