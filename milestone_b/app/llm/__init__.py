@@ -26,7 +26,13 @@ def get_llm(kind: str = "agent_sdk"):
         from app.llm.anthropic_client import AnthropicLLM
 
         return AnthropicLLM()
+    if kind in ("local", "ollama"):
+        from app.llm.local_llm import OllamaLLM
+
+        import os
+
+        return OllamaLLM(model=os.environ.get("OLLAMA_MODEL"))
     raise ValueError(
-        f"get_llm({kind!r}): use 'agent_sdk' (subscription) or 'anthropic' (API key); "
-        "app.llm.fake.ScriptedLLM for offline/test runs"
+        f"get_llm({kind!r}): use 'agent_sdk' (subscription), 'anthropic' (API key), "
+        "or 'local'/'ollama' (Ollama server); app.llm.fake.ScriptedLLM for offline/test runs"
     )

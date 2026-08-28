@@ -71,8 +71,22 @@ class AgentSDKLLM:
                     final = getattr(message, "result", None)
                     usage = getattr(message, "usage", None)
                     if usage is not None:
-                        inp = int(getattr(usage, "input_tokens", 0) or 0)
-                        out = int(getattr(usage, "output_tokens", 0) or 0)
+                        # SDK >= 0.2: `usage` is a dict; older builds exposed an
+                        # object. With prompt caching the input is split across
+                        # `input_tokens` + `cache_read_input_tokens` +
+                        # `cache_creation_input_tokens` — sum them for a true count.
+                        u = usage if isinstance(usage, dict) else {
+                            k: getattr(usage, k, 0)
+                            for k in ("input_tokens", "output_tokens",
+                                      "cache_read_input_tokens",
+                                      "cache_creation_input_tokens")
+                        }
+                        inp = sum(
+                            int(u.get(k, 0) or 0)
+                            for k in ("input_tokens", "cache_read_input_tokens",
+                                      "cache_creation_input_tokens")
+                        )
+                        out = int(u.get("output_tokens", 0) or 0)
         except ResultError:
             # e.g. max-turns hit; fall through and use whatever text we collected
             if not chunks:

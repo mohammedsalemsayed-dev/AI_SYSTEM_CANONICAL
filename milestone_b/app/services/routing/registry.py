@@ -33,10 +33,11 @@ DEFAULT_PROVIDERS: list[ProviderSpec] = [
         notes="seam: small local model for qa_explain / ops",
     ),
     ProviderSpec(
-        id="local-coder", provider="local", model="", local=True,
+        id="local-coder", provider="local", model="qwen2.5-coder:7b", local=True,
         context_window=16_384, quality_prior=0.6, latency_prior_s=6.0,
         cost_prior_usd=0.0, resource_cost=0.6, privacy_score=1.0, available=False,
-        notes="seam: local coding model for code_edit_local / debug",
+        notes="local coding model for code_edit_local / debug (Ollama); "
+              "available=False until probe_local() confirms the server is up",
     ),
     ProviderSpec(
         id="local-reasoner", provider="local", model="", local=True,
@@ -78,3 +79,24 @@ class ProviderRegistry:
 
     def add(self, spec: ProviderSpec) -> None:
         self._by_id[spec.id] = spec
+
+    def probe_local(self, *, host: str | None = None) -> list[str]:
+        """Runtime check: if an Ollama server answers and has the pulled model,
+        flip the matching `local-*` specs to available. Returns the ids enabled.
+        No-op (returns []) when the server is down — the seam stays a seam.
+        Never raises."""
+        try:
+            from app.llm.local_llm import OllamaLLM
+        except Exception:  # noqa: BLE001
+            return []
+        enabled: list[str] = []
+        for spec in self._by_id.values():
+            if not spec.local or not spec.model:
+                continue
+            try:
+                if OllamaLLM(model=spec.model, host=host).available():
+                    spec.available = True
+                    enabled.append(spec.id)
+            except Exception:  # noqa: BLE001 — probe must never break routing
+                continue
+        return enabled
