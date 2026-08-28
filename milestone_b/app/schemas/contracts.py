@@ -409,6 +409,17 @@ class RouteDecision(BaseModel):
     ts: float = Field(default_factory=now_ts)
 
 
+class WeightSet(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("wset"))
+    task_class: str = ""
+    weights: dict[str, float] = Field(default_factory=dict)
+    feature_order: list[str] = Field(default_factory=list)
+    n_train: int = 0
+    val_accuracy: float = 0.0
+    fitted_ts: float = Field(default_factory=now_ts)
+    degenerate: bool = False
+
+
 class HardwareSnapshot(BaseModel):
     gpu_temp_c: float | None = None
     gpu_percent: float = 0.0

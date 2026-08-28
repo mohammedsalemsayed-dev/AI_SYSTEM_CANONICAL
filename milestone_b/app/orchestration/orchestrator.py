@@ -119,6 +119,7 @@ class Orchestrator:
         self.kb = None  # Milestone L — set to a KnowledgeBase for doc_analysis tasks
         self.authoring = None  # Milestone M — set to an AuthoringPipeline for authoring tasks
         self.engines = None  # Milestone N — set to an EngineRegistry for engine-aware context
+        self.selection = None  # Milestone O — set to a ModelSelectionController for fitted routing
         self.canary_enabled = False  # Milestone I — canary-gate freshly promoted changes
         self.canary_fraction = 0.20  # Milestone I — live cohort fraction
         self.canary_min_samples = 10  # Milestone I — uses before a canary verdict
@@ -981,6 +982,20 @@ class Orchestrator:
         otherwise None."""
         if self.router is None:
             return None
+        # Milestone O — let the selection controller decide static vs data-driven
+        # for this task_class, gated by the guardrail regression check, and hand
+        # the fitted weights to the router.
+        if self.selection is not None:
+            self.router.selection = self.selection
+            reg = None
+            if self.memory is not None:
+                from app.services.eval.regression import RegressionBaseline
+
+                rb = RegressionBaseline(self.memory)
+                if rb.latest() is not None:
+                    reg = lambda: rb.certify(rb.latest())  # noqa: E731 — trivial thunk
+            self.selection.promote(contract.task_class, regression_check=reg,
+                                   log=self.log, task_id=task_id)
         mode = self._hardware_mode(task_id)
         risk = getattr(contract, "risk_level", "low")
         decision = self.router.route(
@@ -1118,6 +1133,11 @@ class Orchestrator:
                 task_id, EventKind.REGRESSION,
                 {"kind": "route_freeze", "task_class": tc, "model": model},
             )
+            # Milestone O — a data-driven challenger that rolled back sends the
+            # whole class back to the static table, not just this one model.
+            if self.selection is not None:
+                self.selection.demote(tc, "route canary rollback",
+                                      log=self.log, task_id=task_id)
 
     def _emit_composition(self, task_id, contract) -> None:
         from app.services.agents.composition import select_roles

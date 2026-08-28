@@ -36,8 +36,9 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 | **L** RAG / knowledge base (§10.2 domain 3) | `KnowledgeBase` ingest + heading-aware chunking + BM25 lexical retrieval behind a `Retriever` protocol; claims-only KB answer at `doc_input` trust; `doc_analysis` is a first-class flow; research pipeline can blend library + web. A real embedding/RAG framework is the integration point behind `Retriever` (§16) | **built** |
 | **M** Authoring pipelines (§10.2 domain 4) | `DocumentModel` + `SlideDeck`; outline → KB-grounded draft (cited, `doc_input` trust) → review pass → Markdown/HTML render; `authoring` is a first-class flow. DOCX/PPTX/PDF are `Renderer` stubs — drop in python-docx / python-pptx (§16) | **built** |
 | **N** Engine adapters & expert modes (§10.2 domain 5) | Godot / Unreal / Android / generic project detection + `EngineInfo` (globs, build/test cmd, conventions) + expert prompt profiles injected at planning; engine-native build/test execution is the §5-C tier-C seam | **built** |
+| **O** Automated model selection (§10.2 domain 6) | logistic-regression `WeightSet` fit over routing features + `ModelSelectionController` flipping a `task_class` static↔data-driven, gated by the guardrail regression check and demoted on a canary rollback; `PROVISIONAL_WEIGHTS` is now the fallback. A real fit needs a scored-run corpus (offline fitter built, not run) | **built** |
 
-**376 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`).
+**384 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION.**
 
 ### Needs an external resource (built, not run here)
 
@@ -47,13 +48,14 @@ Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §1
 | Single-vs-multi benchmark | `python -m tests.benchmark.run_multiagent_bench …` | subscription — gates the Critic promote-to-default decision |
 | Model eligibility seeder | `python -m tests.benchmark.seed_model …` | subscription |
 | Guardrail regression runner | `python -m tests.regression.run_guardrail` (`--offline` works now) | subscription for the real-model run |
+| Routing-weight fitter | `python -m tests.benchmark.fit_weights --write` | a populated `RouteStatsStore` (run the seeder first, on the subscription) |
 | Native installers | `python desktop/build.py` | Rust toolchain + PyInstaller + platform build tools (+ signing certs) |
 
 ## Quick start (the running slice)
 
 ```bash
 cd milestone_b
-python -m pytest tests/unit tests/security tests/integration tests/regression   # 314 green
+python -m pytest tests/unit tests/security tests/integration tests/regression   # 384 green
 python -m app.cli.demo                                                          # offline end-to-end
 python -m app.ui.run_ui --db slice.db --port 8770                               # desktop shell -> http://127.0.0.1:8770
 ```

@@ -439,5 +439,33 @@ Now real (slice scope):
 
 Deferred: engine-toolchain execution (§5-C tier-C sandbox seam — `godot --headless` / UBT /
 `gradlew`); engine-native verification as a T-ladder tier; per-engine repo-intelligence
-parsers; more engines (Unity, Bevy, Xcode, Flutter). Last §10.2 domain: automated model
-selection (needs G + ≥ 20 verified runs).
+parsers; more engines (Unity, Bevy, Xcode, Flutter).
+
+## Milestone O — automated model selection (`milestone_b/`, days 1–10)
+
+384 tests green. All 10 days built. Sixth and final §10.2 capability domain —
+**all six are now FOUNDATION.** See `milestone_b/MILESTONE_O_NOTES.md`.
+
+Now real (slice scope):
+- **Feature vector** — `routing/features.py` `feature_row()`: the six §7.2 priors + bias,
+  with measured aggregates replacing priors once a model is eligible.
+- **Logistic weight fit** — `routing/weightfit.py`: stdlib batch gradient descent (sigmoid
+  log-loss + L2), deterministic → `WeightSet{weights, n_train, val_accuracy, degenerate}`.
+  Converges to ≥ 0.95 val-accuracy on separable data; degenerate/tiny input → a flagged
+  `WeightSet`, not a crash.
+- **Selection controller** — `routing/selection.py` `ModelSelectionController`: per
+  `task_class`, flips `static` ↔ `data_driven`, persisted to system memory, gated by
+  eligible-count + fit-quality + the Milestone I guardrail regression check. `demote()` is
+  immediate; re-promotion needs a fresh `evaluate()`.
+- **Router** — `Router(selection=)`: a data-driven class ranks candidates with the fitted
+  `WeightSet`; otherwise `PROVISIONAL_WEIGHTS` (now the fallback, untouched).
+- **Orchestrator** — `orch.selection` opt-in; consulted before routing (`SELECTION` event);
+  a route-canary rollback (Milestone I) also `demote`s the class. Selection unset → routing
+  unchanged.
+- **Offline fitter** — `tests/benchmark/fit_weights.py` (reads a populated `RouteStatsStore`,
+  writes per-class `WeightSet`s; **not run** — needs a scored-run corpus).
+- **Scope** — changes which provider runs, never the policy/capability/taint path. Event
+  kind `SELECTION`.
+
+Deferred: a real weight fit (needs a scored-run corpus); non-linear models behind
+`WeightSet`; per-role weight sets; automatic quarterly refit scheduling.

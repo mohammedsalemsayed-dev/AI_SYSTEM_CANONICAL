@@ -75,6 +75,7 @@ class EventKind:
     KB = "KB"
     AUTHORING = "AUTHORING"
     ENGINE = "ENGINE"
+    SELECTION = "SELECTION"
 
 
 class Event(BaseModel):

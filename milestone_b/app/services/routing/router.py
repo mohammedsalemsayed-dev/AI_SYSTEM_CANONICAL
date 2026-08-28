@@ -41,11 +41,13 @@ class Router:
         *,
         epsilon: float = EPSILON,
         seed: int | None = None,
+        selection=None,
     ) -> None:
         self.registry = registry or ProviderRegistry()
         self.stats = stats
         self.epsilon = epsilon
         self._rng = random.Random(seed)
+        self.selection = selection  # Milestone O — ModelSelectionController
 
     # -- public ---------------------------------------------------- #
     def route(
@@ -159,6 +161,19 @@ class Router:
         return max(scored, key=lambda t: t[1])
 
     def _score(self, spec: ProviderSpec, task_class: str, hardware_mode: str) -> float:
+        # Milestone O — a fitted WeightSet for a data-driven class replaces the
+        # provisional weights entirely.
+        if self.selection is not None and self.selection.mode(task_class) == "data_driven":
+            ws = self.selection.weights_for(task_class)
+            if ws is not None and not ws.degenerate:
+                from app.services.routing.features import feature_row
+                from app.services.routing.weightfit import score as _fitted_score
+
+                agg = None
+                if self.stats is not None and self.stats.eligible(task_class, spec.model or spec.id):
+                    agg = self.stats.aggregate(task_class, spec.model or spec.id)
+                return _fitted_score(ws, feature_row(spec, agg))
+
         w = PROVISIONAL_WEIGHTS
         quality = spec.quality_prior
         latency = spec.latency_prior_s
