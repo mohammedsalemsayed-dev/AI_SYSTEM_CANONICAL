@@ -5,8 +5,9 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
-build/
-dist/
+# anchored to repo root: do NOT match app/services/build/ (the Builder package)
+/build/
+/dist/
 
 # secrets — never commit
 .env.local
