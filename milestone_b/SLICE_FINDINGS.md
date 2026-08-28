@@ -5,66 +5,61 @@ Agent SDK) → **AgentSDKBuilder** (Builder) → **VerifierT0** running pytest i
 Tier-A sandbox**. No API key, no per-token spend.
 
 Two runs: 10 hand-seeded single-function bugs, then 5 **real** bug-fix commits from
-`more-itertools` history (source fix reverted, the test the fix added kept).
+`more-itertools` history (source fix reverted, the test the fix added kept). The real run was
+repeated after the "next steps" step 1 (Builder prompt hardened to read the failing test
+first and match its exact assertions).
 
 ## Run 1 — 10 seeded bugs
 
-| id | state | T0 | s | diff_correct |
-|---|---|---|---|---|
-| 01-pagination-off-by-one | COMPLETED | pass | 21.8 | yes — removed `+ 1` |
-| 02-boundary-operator | COMPLETED | pass | 19.2 | yes — `>` → `>=` |
-| 03-missing-empty-guard | COMPLETED | pass | 24.9 | yes — `if not xs: return 0.0` |
-| 04-int-vs-float-division | COMPLETED | pass | 24.9 | yes — `//` → `/` |
-| 05-mutable-default-arg | COMPLETED | pass | 21.6 | yes — `tags=None` + guard |
-| 06-wrong-dict-key | COMPLETED | pass | 20.6 | yes — `'town'` → `'city'` |
-| 07-inverted-boolean | COMPLETED | pass | 22.6 | yes — dropped the `not` |
-| 08-missing-normalization | COMPLETED | pass | 21.6 | yes — `strip().lower()` scan (verbose, correct) |
-| 09-accumulator-init | COMPLETED | pass | 18.9 | yes — `0` → `1` |
-| 10-returns-first-not-all | COMPLETED | pass | 40.2 | yes — accumulate into a list |
-
-**10/10 completed, 10/10 T0 pass, 10/10 diffs correct.**
+**10/10 completed, 10/10 T0 pass, 10/10 diffs correct** (off-by-one, boundary operator,
+empty guard, int/float division, mutable default arg, wrong dict key, inverted boolean,
+missing normalization, accumulator init, returns-first-not-all). Median ~22 s.
 
 ## Run 2 — 5 real more-itertools bug fixes
 
+### Before step 1 (original Builder prompt)
+
+| id | state | T0 | diff_correct |
+|---|---|---|---|
+| mit-01-chunked-negative | FAILED | fail | **no** — `ValueError('n must be non-negative.')`; test wants `assertRaisesRegex(..., "n must be at least 0")` |
+| mit-02..05 | COMPLETED | pass | yes ×4 |
+
+4/5. The miss: behaviour right, exact message wrong. **T0 correctly rejected it.**
+
+### After step 1 (Builder reads the target test, matches its exact assertions)
+
 | id | state | T0 | s | diff_correct | note |
 |---|---|---|---|---|---|
-| mit-01-chunked-negative | FAILED | **fail** | 26.1 | **no** | raised `ValueError('n must be non-negative.')`; the test uses `assertRaisesRegex(..., "n must be at least 0", ...)` — behaviour right, exact message wrong. **T0 correctly rejected it.** |
-| mit-02-interleave-evenly-empty | COMPLETED | pass | 26.7 | yes | `if not dims: return` — **identical to the real fix** |
-| mit-03-numeric-range-reversed-empty | COMPLETED | pass | 30.9 | yes | empty-range guard in `__reversed__` |
-| mit-04-product-index-iterator | COMPLETED | pass | 36.5 | yes | `len(element)` → `len(elements)` — **the real fix** (materialise the iterator before `len`) |
-| mit-05-running-min-max-stability | COMPLETED | pass | 66.8 | yes | pop condition `not a < value` → `a > value` — **logically equivalent to the real fix** (keep equal values → stable) |
+| mit-01-chunked-negative | COMPLETED | pass | 170.0 | **yes** | `raise ValueError('n must be at least 0')` — **now identical to the real fix** |
+| mit-02-interleave-evenly-empty | COMPLETED | pass | 36.3 | yes | `if dims == 0: return` |
+| mit-03-numeric-range-reversed-empty | COMPLETED | pass | 45.9 | yes | `if len(self) == 0: return iter(())` |
+| mit-04-product-index-iterator | COMPLETED | pass | 51.1 | yes | `len(element)` → `len(elements)` — the real fix |
+| mit-05-running-min-max-stability | COMPLETED | pass | 229.9 | yes | pop condition `not a < value` → `a > value` — logically equivalent to the real fix |
 
-**4/5 completed with T0 pass; the 1 failure was caught by verification, not shipped.**
+**5/5.** Wall-clock rose on the two hardest tasks (26 s → 170 s, and 230 s) because the
+Builder now reads the test file before editing — a correctness/latency trade to tune later.
 
 ## Combined verdict (MILESTONE_B_PLAN.md §7)
 
-- diff_correct: **14 / 15 (93%)**
-- **Zero false positives** — nothing incorrect ever reached `COMPLETED`; the one wrong fix
-  failed the T0 gate and the task ended `FAILED`.
-- unaided T0 criterion: **15 / 15** — the Interpreter always produced a usable pytest target.
-- median wall-clock: ~22 s (seeded), ~31 s (real, larger codebase).
+- diff_correct: **15 / 15 (100%)** after step 1
+- **Zero false positives** across every run — nothing incorrect ever reached `COMPLETED`
+- unaided T0 criterion: **15 / 15**
 
-**Well above the ≥ 70% threshold → the premise holds.** The loop — request → contract →
-plan → edit → sandboxed verify → result — works end to end with a real model and the real
-control plane, on real code, and the verification gate reliably distinguishes a passing fix
-from a non-passing one.
-
-## Weakness surfaced (actionable, not a blocker)
-
-The Builder does not reliably **read the failing test before editing** — mit-01's fix was
-behaviourally correct but didn't match the test's exact `assertRaisesRegex` message. This is
-a DESIGN_TIGHTENING §14.1 prompt-tuning item ("make exactly what the test asserts pass"),
-addressed later, not a design flaw. Notably the system failed *safely*: T0 caught it.
+**The premise holds.** The loop works end to end with a real model and the real control
+plane, on real code, and the verification gate reliably distinguishes a passing fix from a
+non-passing one. The one class of miss (behaviourally-plausible fix that doesn't match a
+precise assertion) was closed by a prompt change and is the exact case the Milestone E
+Critic is designed to catch structurally.
 
 ## Caveats
 
-- Seeded bugs are 1–5 line single-function fixes. The real bugs are small too (1–15 line
-  source diffs) though in a genuine codebase with a 7000-line test file.
+- Bugs are small (1–15 line source diffs) though the real ones live in a genuine codebase
+  with a 7000-line test file.
 - Every request named its failing test (realistic bug-report framing; vaguer asks correctly
   route to `WAITING_FOR_USER`).
 - Token cost not reported on subscription auth (`0` in the raw tables).
 - No personal repos were available on this machine; the "real" run uses open-source history
-  as the substitute, which is arguably a stronger signal (bugs not designed by us).
+  as the substitute (bugs not designed by us — arguably a stronger signal).
 
 ## Reproduce
 
