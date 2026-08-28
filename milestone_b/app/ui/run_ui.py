@@ -17,7 +17,7 @@ from app.ui.server import serve
 
 
 def _build_runner(db_path: str):
-    from app.events.log import EventLog
+    from app.events.log import open_event_log
     from app.llm import get_llm
     from app.orchestration.orchestrator import Orchestrator
     from app.services.build.agent_sdk import AgentSDKBuilder
@@ -26,7 +26,7 @@ def _build_runner(db_path: str):
     from app.services.policy.engine import PolicyEngine
     from app.services.verify.verifier_t0 import VerifierT0
 
-    log = EventLog(db_path)
+    log = open_event_log(db_path)
     llm = get_llm("agent_sdk")
     orch = Orchestrator(
         log, Interpreter(llm), Planner(llm), AgentSDKBuilder(),

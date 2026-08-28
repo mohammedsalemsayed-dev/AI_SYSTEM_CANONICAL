@@ -175,3 +175,26 @@ class EventLog:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+def open_event_log(target: str = ":memory:"):
+    """Open the event log for `target`, picking the backend from its shape:
+
+      - ``postgres://…`` / ``postgresql://…``  -> `PostgresEventLog` (durable,
+        multi-session; needs `psycopg`)
+      - ``sqlite:///path`` / a bare path / ``:memory:``  -> `EventLog` (stdlib
+        sqlite3, the default)
+
+    Both backends share the exact same interface, so callers don't branch. The
+    ``NEXUS_DB_URL`` env var overrides `target` when set (deploy knob)."""
+    import os
+
+    target = os.environ.get("NEXUS_DB_URL") or target
+    low = target.lower()
+    if low.startswith(("postgres://", "postgresql://")):
+        from app.events.pg_log import PostgresEventLog
+
+        return PostgresEventLog(target)
+    if low.startswith("sqlite:///"):
+        target = target[len("sqlite:///"):]
+    return EventLog(target)

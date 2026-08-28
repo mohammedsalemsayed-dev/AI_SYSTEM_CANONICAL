@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from app.events.log import EventLog
+from app.events.log import EventLog, open_event_log
 from app.ui import readmodels
 from app.ui.events import EventFeed, keepalive_frame, sse_frame
 from app.ui.paths import web_dir
@@ -60,7 +60,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _open_log(self) -> EventLog:
-        return EventLog(self.server.db_path)  # type: ignore[attr-defined]
+        return open_event_log(self.server.db_path)  # type: ignore[attr-defined]
 
     # -- routing --------------------------------------------------- #
     def do_GET(self) -> None:  # noqa: N802

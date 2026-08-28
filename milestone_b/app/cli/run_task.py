@@ -13,7 +13,7 @@ import argparse
 import os
 import sys
 
-from app.events.log import EventKind, EventLog
+from app.events.log import EventKind, EventLog, open_event_log
 from app.orchestration.orchestrator import Orchestrator
 from app.services.build import get_builder
 from app.services.interpret.interpreter import Interpreter
@@ -45,7 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run_task")
     parser.add_argument("request")
     parser.add_argument("--workspace", required=True)
-    parser.add_argument("--db", default="slice_events.db")
+    parser.add_argument("--db", default="slice_events.db",
+                        help="event store: a SQLite path (default) or a "
+                             "'postgres://user:pass@host/db' URL (needs the "
+                             "'postgres' extra). NEXUS_DB_URL overrides this.")
     parser.add_argument("--llm", default=os.environ.get("SLICE_LLM", "anthropic"),
                         help="default provider for every role (agent_sdk | anthropic | local)")
     parser.add_argument("--interpreter-llm", default=None,
@@ -100,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"workspace must be a git repo: {workspace}", file=sys.stderr)
         return 2
 
-    log = EventLog(args.db)
+    log = open_event_log(args.db)
     try:
         # one provider instance per distinct kind (a local server is stateful; a
         # cloud client is cheap either way)

@@ -11,6 +11,9 @@ dependencies = [
 # pulled in on the days that need them (see MILESTONE_B_PLAN.md work breakdown)
 llm = ["anthropic>=0.40", "claude-agent-sdk>=0.1"]
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
+# durable multi-session event store; SQLite stays the default (stdlib, no dep).
+# select Postgres with --db 'postgres://…' or NEXUS_DB_URL. See app/events/pg_log.py.
+postgres = ["psycopg[binary]>=3.2"]
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
