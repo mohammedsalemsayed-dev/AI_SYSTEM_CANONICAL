@@ -22,7 +22,30 @@ import time
 import traceback
 from typing import Any, Callable
 
-_LOCAL = "local:qwen3:8b"
+_LOCAL = "local:qwen3:8b"                 # interpret / plan / reason
+# a code-specialised local model does the actual editing when it's pulled;
+# `ollama pull qwen2.5-coder:7b` (or :14b) to enable — falls back to _LOCAL.
+_CODER_CANDIDATES = ("qwen2.5-coder:14b", "qwen2.5-coder:7b", "qwen2.5-coder",
+                     "deepseek-coder-v2:16b", "codellama:13b")
+_coder_cache: dict[str, str] = {}
+
+
+def _local_coder() -> str:
+    """`local:<model>` string for the best pulled coder model, else `_LOCAL`."""
+    if "v" in _coder_cache:
+        return _coder_cache["v"]
+    import json as _json
+    import urllib.request as _u
+    tags: set[str] = set()
+    try:
+        with _u.urlopen("http://localhost:11434/api/tags", timeout=4) as r:
+            tags = {m.get("name", "") for m in _json.loads(r.read()).get("models", [])}
+    except Exception:  # noqa: BLE001
+        tags = set()
+    pick = next((c for c in _CODER_CANDIDATES
+                 if c in tags or any(t.split(":")[0] == c for t in tags)), None)
+    _coder_cache["v"] = f"local:{pick}" if pick else _LOCAL
+    return _coder_cache["v"]
 
 # escalation choices offered in the shell — label -> get_builder() kind string.
 # "" = the Agent SDK's own default model.
@@ -212,11 +235,12 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
             from app.services.verify.verifier_android import AndroidVerifier
 
             verifier = AndroidVerifier()
+        coder = _local_coder()                       # qwen2.5-coder if pulled, else _LOCAL
         orch = Orchestrator(
             log,
-            Interpreter(local_llm),
+            Interpreter(local_llm),                  # reasoning model interprets + plans
             Planner(local_llm),
-            _CancelBuilder(get_builder(_LOCAL)),   # local-first Builder (qwen3:8b)
+            _CancelBuilder(get_builder(coder)),      # code-specialised model does the edits
             verifier,
             PolicyEngine(),
         )
@@ -234,6 +258,13 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
         # the current plan's combined step capabilities, so a re-drive allows the
         # writes the first attempt already allowed.
         wire_full_stack(orch, db_path=db_path, workspace=workspace, verbose=False)
+        # wire_full_stack resets orch.builder to a plain qwen3 local builder — put
+        # the code-specialised model back as the primary (reasoning stays qwen3)
+        _cb = _CancelBuilder(get_builder(coder))
+        orch.builder = _cb
+        for _k in ("local-coder", "local-small", "local-reasoner", "local"):
+            if _k in (orch.builder_registry or {}):
+                orch.builder_registry[_k] = _cb
         # Stop also reaches the agents wire_full_stack built with their own llm
         for _agent in (getattr(orch, "brainstorm", None), getattr(orch, "critic", None)):
             if _agent is not None and getattr(_agent, "llm", None) is not None:

@@ -395,8 +395,10 @@ def _row_data(kind: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     if kind == EventKind.ESCALATION:
         if "from_builder" in payload or "to_builder" in payload:
             return {"from": payload.get("from_builder"), "to": payload.get("to_builder"),
-                    "reason": payload.get("reason", "")}
-        return {"rung": payload.get("rung"), "reason": payload.get("reason", "")}
+                    "reason": payload.get("reason", "") or payload.get("detail", "")}
+        return {"rung": payload.get("rung"),
+                "reason": payload.get("reason", "") or payload.get("tried", ""),
+                "tried": payload.get("tried", "")}
     if kind == EventKind.VERIFICATION:
         return {"tier": payload.get("tier", "T0"), "overall": payload.get("overall", "?")}
     if kind == EventKind.MODEL_RUN:

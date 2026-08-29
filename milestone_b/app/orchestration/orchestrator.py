@@ -82,6 +82,20 @@ class BudgetExhausted(Exception):
 
 _TERMINAL = {State.COMPLETED, State.FAILED, State.CANCELLED}
 
+_SRC_EXT = (".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".kt",
+            ".rb", ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".gd", ".php", ".swift")
+
+
+def _is_greenfield(listing: str) -> bool:
+    """True when the workspace has almost no source files yet — a fresh project
+    folder where 'risk=medium' really means 'create a new file', not 'endanger
+    existing security-relevant code'."""
+    if not listing or not listing.strip():
+        return True
+    src = [ln for ln in listing.splitlines()
+           if ln.strip().lower().endswith(_SRC_EXT)]
+    return len(src) < 4
+
 
 class Orchestrator:
     def __init__(
@@ -324,7 +338,8 @@ class Orchestrator:
 
             self._transition(task_id, State.PLANNING)
             if self._route_and_check_hardware(
-                task_id, contract, context_tokens=len(listing) // 4
+                task_id, contract, context_tokens=len(listing) // 4,
+                greenfield=_is_greenfield(listing),
             ) is False:
                 return self._finish(
                     task_id, "paused: hardware protection", state=State.WAITING_FOR_USER
@@ -370,6 +385,7 @@ class Orchestrator:
         approved_steps: set[str],
         critic_round: int = 0,
         builder_round: int = 0,
+        prev_diff: str = "",
     ) -> TaskResult:
         # route-driven Builder pick (round 0 only; the fallback path owns round 1).
         _route_primary = None
@@ -385,6 +401,14 @@ class Orchestrator:
             finally:
                 if _route_primary is not None:
                     self.builder = _route_primary  # restore before any retry/settle
+            # a fallback builder that produced nothing (e.g. the cloud SDK is not
+            # configured) must not erase a real diff the earlier round produced —
+            # verify that instead of failing with a bare "no change"
+            if not combined_diff.strip() and prev_diff.strip():
+                combined_diff = prev_diff
+                self.log.append(task_id, EventKind.PROGRESS,
+                                {"note": "fallback builder made no change",
+                                 "detail": "verifying the previous round's diff instead"})
             self._msg(
                 task_id, "builder", "HANDOFF",
                 claims=[f"diff: {len(combined_diff.encode('utf-8'))} bytes"],
@@ -468,7 +492,7 @@ class Orchestrator:
                 return self._execute_verify_settle(
                     task_id, contract, plan, workspace_path,
                     approved_steps=approved_steps, critic_round=critic_round,
-                    builder_round=1,
+                    builder_round=1, prev_diff=combined_diff,
                 )
             finally:
                 self.builder = primary
@@ -580,7 +604,7 @@ class Orchestrator:
                 return self._execute_verify_settle(
                     task_id, contract, plan, workspace_path,
                     approved_steps=approved_steps, critic_round=critic_round,
-                    builder_round=1,
+                    builder_round=1, prev_diff=combined_diff,
                 )
             finally:
                 self.builder = primary
@@ -1300,7 +1324,8 @@ class Orchestrator:
             if e.kind == EventKind.ROUTE and e.payload.get("provider_id")
         ]
 
-    def _route_and_check_hardware(self, task_id, contract, *, context_tokens: int = 0) -> bool | None:
+    def _route_and_check_hardware(self, task_id, contract, *, context_tokens: int = 0,
+                                  greenfield: bool = False) -> bool | None:
         """Sample the hardware mode (pausing on EMERGENCY) and, if a Router is
         wired, pick a provider and record a ROUTE event. Returns False when the
         hardware mode says pause (caller finishes into WAITING_FOR_USER), else None."""
@@ -1336,6 +1361,14 @@ class Orchestrator:
             self.selection.promote(contract.task_class, regression_check=reg,
                                    log=self.log, task_id=task_id)
         risk = getattr(contract, "risk_level", "low")
+        # a fresh / near-empty workspace has no existing security-relevant paths
+        # to endanger — don't burn a cloud call pre-emptively on "risk=medium"
+        # for what is really "create a new file". Let the local builder try first.
+        if risk == "medium" and greenfield:
+            self.log.append(task_id, EventKind.PROGRESS,
+                            {"note": "risk demoted medium->low",
+                             "detail": "greenfield workspace: no existing files at risk"})
+            risk = "low"
         decision = self.router.route(
             contract.task_class, "builder",
             task_id=task_id, hardware_mode=mode, risk_level=risk,
@@ -1974,13 +2007,19 @@ class Orchestrator:
             result = self.authoring.run(task_id, brief, kind="report", memory_ctx=mem_ctx)
 
         rendered = result.rendered
-        # write a binary render into the user's folder
+        # write the render into the user's folder — binary (docx/pptx/pdf) *and*
+        # text (md/html) so every deliverable lands as a real file, not just a
+        # transcript preview
         written_path = None
-        if rendered.is_binary and workspace_path and Path(workspace_path).is_dir():
+        if workspace_path and Path(workspace_path).is_dir():
             safe = re.sub(r"[^\w\- ]+", "", result.model.title or "document").strip() or "document"
             written_path = f"{safe}.{rendered.ext}"
             try:
-                (Path(workspace_path) / written_path).write_bytes(rendered.data)
+                dest = Path(workspace_path) / written_path
+                if rendered.is_binary:
+                    dest.write_bytes(rendered.data)
+                else:
+                    dest.write_text(rendered.text, encoding="utf-8")
             except OSError as exc:
                 self.log.append(task_id, EventKind.ERROR, {"error": f"write {written_path}: {exc!r}"})
                 written_path = None

@@ -56,6 +56,7 @@ async function refreshSessions() {
 function selectSession(id, ws) {
   sessionId = id;
   sessionWs = ws || sessionWs;
+  showAllTurns = false;            // start each session at the recent tail
   refreshSessions();
   refreshTranscript();
 }
@@ -84,10 +85,24 @@ async function refreshTranscript() {
   renderCounters(tl.counters);
 }
 
+let showAllTurns = false;
+const TURN_WINDOW = 80;
+window.expandStream = () => { showAllTurns = true; renderStream(window.__allEvents || []); };
+
 function renderStream(events) {
   const el = $("stream");
   el.innerHTML = "";
   if (!events || !events.length) { el.innerHTML = `<div class="empty">Send a message to start.</div>`; return; }
+  window.__allEvents = events;
+
+  // long sessions: render only the recent tail unless the user asks for all
+  if (!showAllTurns && events.length > TURN_WINDOW) {
+    const hidden = events.length - TURN_WINDOW;
+    events = events.slice(-TURN_WINDOW);
+    el.insertAdjacentHTML("beforeend",
+      `<button class="show-earlier" onclick="expandStream()">` +
+      `▲ show ${hidden} earlier event${hidden > 1 ? "s" : ""}</button>`);
+  }
 
   let curNest = null;
   let lastWasAnswer = false;
@@ -117,9 +132,16 @@ function renderStream(events) {
     }
     if (e.kind === "ESCALATION") {
       const d = e.data || {};
-      const to = d.to ? `retrying with <b>${esc(d.to)}</b>` : "escalating";
+      const why = d.reason || d.detail || d.tried || "";
+      let msg;
+      if (d.rung) {                       // recovery-ladder rung, not a cloud handoff
+        msg = `recovery: <b>${esc(d.rung)}</b>${why ? ` — ${esc(why)}` : ""}`;
+      } else {
+        const to = d.to ? `retrying with <b>${esc(d.to)}</b>` : "escalating";
+        msg = `local build didn't pass — ${to}${why ? ` <span class="dim">(${esc(why)})</span>` : ""}`;
+      }
       el.insertAdjacentHTML("beforeend",
-        `<div class="escbar"><span>⚡</span><span>Local diff rejected — ${to}</span></div>`);
+        `<div class="escbar"><span>⚡</span><span>${msg}</span></div>`);
       curNest = null;
       continue;
     }
@@ -223,6 +245,22 @@ function renderStatus(tl) {
   const st = tl.state || "—";
   const stCls = st === "COMPLETED" ? "ok" : st === "FAILED" ? "bad"
     : /STALL|RECOVER|WAIT/.test(st) ? "warn" : "";
+  // did this run spend cloud credits, and why?
+  const runs = tl.runs || [];
+  const cloudCalls = runs.filter((r) => r.provider && r.provider !== "local");
+  let costLine;
+  if (cloudCalls.length) {
+    const escEv = (tl.events || []).find((e) => e.kind === "ESCALATION" && (e.data || {}).to);
+    const why = escEv ? ((escEv.data.reason || escEv.data.detail || "").slice(0, 70)) : "cloud model used";
+    const ctok = cloudCalls.reduce((s, r) => s + (r.in || 0) + (r.out || 0), 0);
+    costLine =
+      `<span class="warn" title="${esc(why)}">` +
+      `☁ ${cloudCalls.length} cloud call${cloudCalls.length > 1 ? "s" : ""}` +
+      (ctok ? ` · ~${ktok(ctok)} tok` : "") + `</span>`;
+  } else {
+    costLine = `<span class="ok">100% local · no cloud spend</span>`;
+  }
+
   bar.innerHTML =
     `<span>${esc(tl.task_class || "session")}</span>` +
     `<span class="${stCls}">${esc(st)}</span>` +
@@ -230,7 +268,8 @@ function renderStatus(tl) {
     `<span><b>${c.model_runs || 0}</b> model runs</span>` +
     `<span><b>${ktok(c.in_tokens || 0)}</b>↑ <b>${ktok(c.out_tokens || 0)}</b>↓ tok</span>` +
     `<span>verify <b>${c.verify_pass || 0}</b>/<b>${(c.verify_pass || 0) + (c.verify_fail || 0)}</b></span>` +
-    (c.escalations ? `<span class="warn"><b>${c.escalations}</b> escalation${c.escalations > 1 ? "s" : ""}</span>` : "");
+    (c.escalations ? `<span class="warn"><b>${c.escalations}</b> escalation${c.escalations > 1 ? "s" : ""}</span>` : "") +
+    costLine;
 }
 
 // ---------------------------------------------------------------- right rail
@@ -323,7 +362,13 @@ function applyRunState(run) {
     stop.hidden = false;
     stop.disabled = !!run.cancelling;
     const secs = run.started_ts ? Math.round(Date.now() / 1000 - run.started_ts) : 0;
-    setHint(run.cancelling ? "" : "go", run.cancelling ? "stopping…" : `working… ${secs}s`);
+    // first model call after an Ollama (re)start loads the model into VRAM — slow,
+    // and looks like a hang. Say so while the calls panel is still empty.
+    const warming = secs > 6 && !$("calls").querySelector(".call");
+    setHint(run.cancelling ? "" : "go",
+      run.cancelling ? "stopping…"
+        : warming ? `loading model into memory… ${secs}s`
+          : `working… ${secs}s`);
     if (!runPoll) runPoll = setInterval(healthProbe, 2500);
     // follow the session that's actually running
     if (run.session_id && run.session_id !== sessionId) {

@@ -95,6 +95,40 @@ Do NOT keep calling list_dir for files that are not there — if a path does not
 Call exactly one tool per turn. Never answer in prose. At most ONE list_dir call total — you rarely need it."""
 
 
+_GDSCRIPT_HINT = (
+    "This is GDScript (Godot). Key rules a Python-trained model gets wrong:\n"
+    "- indent with TABS, not spaces. Functions are `func name(args):`. No `def`.\n"
+    "- `extends Node` at the top; typed vars `var x: int = 0`; `return a + b`.\n"
+    "- no `self.` needed for members; `print(...)`; arrays `[]`, dicts `{}`.\n"
+    "- run_tests here runs `godot --headless` against the target script, not pytest."
+)
+_KOTLIN_HINT = (
+    "This is Kotlin/Java (Android/Gradle). `fun name(a: Int): Int = a + b`, "
+    "`val`/`var`, no semicolons needed. Unit tests use JUnit "
+    "(`@Test fun ...() { assertEquals(expected, actual) }`). run_tests runs `./gradlew`."
+)
+_PY_HINT = (
+    "This is Python. Tests are pytest: plain `assert`, "
+    "`with pytest.raises(ValueError):` for exceptions. Keep the source change minimal."
+)
+
+
+def _language_hint(root: Path, target_file: str, contract: TaskContract) -> str:
+    ext = Path(target_file).suffix.lower() if target_file else ""
+    ev = " ".join(contract.required_evidence).lower()
+    try:
+        names = {p.suffix.lower() for p in root.rglob("*") if p.is_file()}
+    except OSError:
+        names = set()
+    if ext == ".gd" or "godot" in ev or ".gd" in names or (root / "project.godot").is_file():
+        return _GDSCRIPT_HINT
+    if ext in (".kt", ".java") or "gradle" in ev or {".kt", ".gradle"} & names:
+        return _KOTLIN_HINT
+    if ext == ".py" or ".py" in names:
+        return _PY_HINT
+    return ""
+
+
 @dataclass
 class BuilderMetrics:
     model: str = ""
@@ -169,16 +203,39 @@ class LocalBuilder:
         target = extract_pytest_target(contract.required_evidence) or ""
         target_file = target.split("::")[0].split()[0] if target else ""
         target_exists = bool(target_file) and (root / target_file).is_file()
-        mode = (
-            f"The verification target file {target_file!r} EXISTS — read it first, then fix the source."
-            if target_exists else
-            "The verification target file does NOT exist yet. This is a CREATE task: "
-            "write_file the implementation module from the OBJECTIVE now, then (if needed) "
-            "write_file the test file, then run_tests. Do not call list_dir more than once."
+        lang_hint = _language_hint(root, target_file, contract)
+        # the implementation module named in the objective (a *.py that isn't the test)
+        impl = ""
+        for m in re.findall(r"\b([\w./-]+\.(?:py|gd|kt|java|js|ts))\b", contract.objective or ""):
+            base = m.split("/")[-1]
+            if base != Path(target_file).name and not base.startswith("test_"):
+                impl = m
+                break
+        if target_exists:
+            mode = (f"The verification target file {target_file!r} EXISTS — read it first, "
+                    "then fix the source.")
+        else:
+            impl_line = (
+                f"FIRST write_file {impl!r} with the COMPLETE implementation the OBJECTIVE "
+                f"asks for (the whole class/functions, not a stub). "
+                if impl else
+                "FIRST write_file the implementation module named in the OBJECTIVE with COMPLETE code. "
+            )
+            mode = (
+                "The verification target file does NOT exist yet — this is a CREATE task. "
+                + impl_line
+                + f"THEN write_file the test file {target_file!r} (import the implementation, "
+                "plain asserts). THEN run_tests. If run_tests reports a missing module, you "
+                "forgot to write the implementation file — write it now. "
+                "At most ONE list_dir call."
+            )
+        vtarget = target or next(
+            (e for e in contract.required_evidence if "t0" in e.lower()), "(none specified)"
         )
         user = (
             f"OBJECTIVE\n{contract.objective}\n\nTHIS STEP\n{step.intent}\n\n"
-            f"VERIFICATION TARGET\npytest {target or '(none specified)'}\n\n{mode}"
+            f"VERIFICATION TARGET\n{vtarget}\n\n{mode}"
+            + (f"\n\nLANGUAGE NOTES\n{lang_hint}" if lang_hint else "")
         )
         messages = [
             {"role": "system", "content": _SYSTEM},
@@ -188,7 +245,29 @@ class LocalBuilder:
         unproductive = 0   # turns with no genuinely new information / no edit
         list_dirs = 0      # total list_dir calls — cap the exploration spiral
         seen: set[str] = set()
+        forced_impl = False
         from app.runtime_cancel import check as _cancel_check
+
+        def _impl_missing() -> bool:
+            # a CREATE task where the model wrote the test but not the module it imports
+            return bool(impl) and not (root / impl).is_file() and (
+                not target_file or (root / target_file).is_file()
+            )
+
+        def _force_impl() -> bool:
+            """Inject one hard directive to write the implementation file. Returns
+            True if it fired (caller keeps looping), False if already used."""
+            nonlocal forced_impl, unproductive
+            if forced_impl or not _impl_missing():
+                return False
+            forced_impl = True
+            unproductive = 0
+            messages.append({"role": "user", "content":
+                f"STOP. The implementation file {impl!r} still does not exist — you only "
+                f"wrote the test. The test imports it, so it can never pass. Your next call "
+                f"MUST be write_file({impl!r}, <complete working code for the OBJECTIVE>). "
+                f"Do it now, then run_tests, then finish."})
+            return True
 
         for _ in range(self.max_turns):
             _cancel_check()  # user pressed Stop -> abort the build loop
@@ -202,12 +281,16 @@ class LocalBuilder:
                 messages.append({"role": "tool", "content":
                                  "No valid tool call found. Reply with exactly one tool call."})
                 if unproductive >= 5:
+                    if _force_impl():
+                        continue
                     return
                 continue
 
             name, args = calls[0]
             self.metrics.tool_calls += 1
             if name == "finish":
+                if _force_impl():
+                    continue
                 self.metrics.finished = True
                 return
             edits_before = self.metrics.edits
@@ -231,10 +314,14 @@ class LocalBuilder:
             progressed = made_edit or fresh_read or (name == "list_dir" and list_dirs == 1)
             unproductive = 0 if progressed else unproductive + 1
             if unproductive >= 5:
+                if _force_impl():
+                    continue
                 return
             if name == "run_tests":
                 if self.metrics.tests_passed:
                     messages.append({"role": "user", "content": "Tests pass. Call finish now."})
+                elif _force_impl():
+                    continue
                 elif self.metrics.test_runs >= 4 and self.metrics.edits > 0:
                     # churning on failures — stop and let T0 + escalation judge the
                     # diff we already have rather than burning every turn.
