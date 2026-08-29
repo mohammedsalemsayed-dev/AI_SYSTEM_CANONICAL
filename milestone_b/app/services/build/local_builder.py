@@ -144,6 +144,10 @@ class LocalBuilder:
         try:
             self._loop(step, contract, workspace)
         except Exception as exc:  # noqa: BLE001 — a builder failure is a result
+            from app.runtime_cancel import RunCancelled
+
+            if isinstance(exc, RunCancelled):
+                raise  # a Stop is not "no change" — let it settle the task
             self.metrics.error = repr(exc)
         self.metrics.wall_s = round(time.time() - t0, 1)
 
@@ -184,7 +188,10 @@ class LocalBuilder:
         unproductive = 0   # turns with no genuinely new information / no edit
         list_dirs = 0      # total list_dir calls — cap the exploration spiral
         seen: set[str] = set()
+        from app.runtime_cancel import check as _cancel_check
+
         for _ in range(self.max_turns):
+            _cancel_check()  # user pressed Stop -> abort the build loop
             self.metrics.turns += 1
             reply = self._chat(messages)
             messages.append(reply)

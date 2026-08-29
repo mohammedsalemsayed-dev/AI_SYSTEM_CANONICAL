@@ -317,10 +317,13 @@ function setHint(kind, text) {
 
 function applyRunState(run) {
   const btn = $("send-btn");
+  const stop = $("stop-btn");
   if (run && run.running) {
     btn.disabled = true;
+    stop.hidden = false;
+    stop.disabled = !!run.cancelling;
     const secs = run.started_ts ? Math.round(Date.now() / 1000 - run.started_ts) : 0;
-    setHint("go", `working… ${secs}s`);
+    setHint(run.cancelling ? "" : "go", run.cancelling ? "stopping…" : `working… ${secs}s`);
     if (!runPoll) runPoll = setInterval(healthProbe, 2500);
     // follow the session that's actually running
     if (run.session_id && run.session_id !== sessionId) {
@@ -330,8 +333,10 @@ function applyRunState(run) {
     refreshTranscript();
   } else {
     btn.disabled = !submitEnabled;
+    stop.hidden = true;
     if (runPoll) { clearInterval(runPoll); runPoll = null; }
-    if (run && run.last_error) setHint("err", "last run failed — " + run.last_error);
+    if (run && run.last_error === "stopped by you") setHint("", "stopped");
+    else if (run && run.last_error) setHint("err", "last run failed — " + run.last_error);
     else setHint("", "");
     refreshSessions();
     refreshTranscript();
@@ -452,6 +457,12 @@ async function send() {
 }
 
 $("send-btn").onclick = send;
+$("stop-btn").onclick = async () => {
+  $("stop-btn").disabled = true;
+  setHint("", "stopping…");
+  try { await fetch("/api/cancel", { method: "POST" }); } catch (_) {}
+  healthProbe();
+};
 $("msg").addEventListener("keydown", (ev) => {
   if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); send(); }
 });

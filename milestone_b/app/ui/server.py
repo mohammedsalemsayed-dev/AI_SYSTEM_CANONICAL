@@ -94,7 +94,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         route = self.path.rstrip("/")
-        if route not in ("/api/tasks", "/api/settings", "/api/attachments"):
+        if route not in ("/api/tasks", "/api/settings", "/api/attachments", "/api/cancel"):
             return self._json({"error": "not found"}, status=404)
         runner = self.server.runner  # type: ignore[attr-defined]
         if runner is None:
@@ -106,6 +106,13 @@ class _Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
             return self._json({"error": "bad json"}, status=400)
+
+        if route == "/api/cancel":
+            try:
+                from app.ui.runner import request_cancel
+                return self._json(request_cancel())
+            except Exception as exc:  # noqa: BLE001
+                return self._json({"error": repr(exc)}, status=500)
 
         if route == "/api/settings":
             try:

@@ -55,6 +55,7 @@ _state: dict[str, Any] = {
     "last_task_id": None,
     "last_error": None,
     "last_finished_ts": None,
+    "cancelling": False,
 }
 _lock = threading.Lock()
 
@@ -66,6 +67,49 @@ def session_id_for(workspace: str) -> str:
 
 def run_status() -> dict[str, Any]:
     return dict(_state)
+
+
+def request_cancel() -> dict[str, Any]:
+    """Ask the in-flight run to stop at its next checkpoint (Stop button)."""
+    from app import runtime_cancel
+
+    with _lock:
+        if not _state["running"]:
+            return {"cancelling": False, "running": False}
+        runtime_cancel.request()
+        _state["cancelling"] = True
+        return {"cancelling": True, "running": True}
+
+
+class _CancelLLM:
+    """Wraps an LLM so every .complete() first honours a Stop request."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def complete(self, *args: Any, **kwargs: Any) -> Any:
+        from app.runtime_cancel import check
+        check()
+        return self._inner.complete(*args, **kwargs)
+
+
+class _CancelBuilder:
+    """Wraps a Builder so .execute() first honours a Stop request."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.name = getattr(inner, "name", "builder")
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def execute(self, *args: Any, **kwargs: Any) -> Any:
+        from app.runtime_cancel import check
+        check()
+        return self._inner.execute(*args, **kwargs)
 
 
 # --------------------------------------------------------------------------- #
@@ -124,6 +168,9 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
     try:
         from pathlib import Path
 
+        from app import runtime_cancel
+        runtime_cancel.arm()  # clear any stale Stop flag before this run
+
         is_godot = Path(workspace, "project.godot").is_file()
         is_unreal = any(Path(workspace).glob("*.uproject"))
         is_android = (Path(workspace, "settings.gradle").is_file()
@@ -150,7 +197,7 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
                            "unit tests on a workspace copy.]")
         full_request = "\n".join(x for x in (preamble, engine_note, att_note, request) if x)
 
-        local_llm = get_llm(_LOCAL)
+        local_llm = _CancelLLM(get_llm(_LOCAL))  # Stop button honoured per model call
         # engine projects don't verify with pytest
         verifier = VerifierT0()
         if is_unreal:
@@ -169,12 +216,12 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
             log,
             Interpreter(local_llm),
             Planner(local_llm),
-            get_builder(_LOCAL),                # local-first Builder (qwen3:8b)
+            _CancelBuilder(get_builder(_LOCAL)),   # local-first Builder (qwen3:8b)
             verifier,
             PolicyEngine(),
         )
         esc_kind = ESCALATION_CHOICES.get(_settings["escalation"], "agent_sdk")
-        orch.fallback_builder = get_builder(esc_kind)  # escalate on verify failure
+        orch.fallback_builder = _CancelBuilder(get_builder(esc_kind))  # escalate on verify failure
 
         from app.cli.full_stack import wire_full_stack
 
@@ -187,6 +234,10 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
         # the current plan's combined step capabilities, so a re-drive allows the
         # writes the first attempt already allowed.
         wire_full_stack(orch, db_path=db_path, workspace=workspace, verbose=False)
+        # Stop also reaches the agents wire_full_stack built with their own llm
+        for _agent in (getattr(orch, "brainstorm", None), getattr(orch, "critic", None)):
+            if _agent is not None and getattr(_agent, "llm", None) is not None:
+                _agent.llm = _CancelLLM(_agent.llm)
         # keep the run local when local succeeds: the (cloud) T2 ensemble only
         # runs after an escalation, not on a clean local pass.
         orch.t2_on_escalation_only = True
@@ -216,12 +267,20 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
 
             apply_task_result(log, result.task_id, workspace)
     except Exception as exc:  # noqa: BLE001 — surface, don't crash the server
-        _state["last_error"] = f"{type(exc).__name__}: {exc}"
-        print("[nexus-runner] run failed:\n" + traceback.format_exc(), flush=True)
+        from app.runtime_cancel import RunCancelled
+
+        if isinstance(exc, RunCancelled):
+            _state["last_error"] = "stopped by you"
+        else:
+            _state["last_error"] = f"{type(exc).__name__}: {exc}"
+            print("[nexus-runner] run failed:\n" + traceback.format_exc(), flush=True)
     finally:
+        from app import runtime_cancel
+        runtime_cancel.arm()  # drop the flag so it can't leak into the next run
         log.close()
         with _lock:
             _state["running"] = False
+            _state["cancelling"] = False
             _state["last_finished_ts"] = time.time()
 
 
@@ -244,7 +303,7 @@ def build_task_runner(db_path: str) -> Callable[..., dict[str, Any]]:
                 return {"error": "a run is already in progress",
                         "session_id": _state.get("session_id")}
             _state.update(running=True, started_ts=time.time(), session_id=session_id,
-                          workspace=workspace, request=request,
+                          workspace=workspace, request=request, cancelling=False,
                           last_error=None, last_task_id=None, last_finished_ts=None)
 
         threading.Thread(

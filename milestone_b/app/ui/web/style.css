@@ -283,6 +283,32 @@ main { display: flex; flex-direction: column; min-width: 0; min-height: 0; posit
 .composer #send-btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
 .composer textarea:disabled { opacity: .5; cursor: not-allowed; }
 
+.composer #stop-btn {
+  background: transparent; color: var(--bad);
+  border: 1px solid color-mix(in srgb, var(--bad) 55%, var(--line));
+  padding: 8px 14px; border-radius: 7px; font-weight: 600; cursor: pointer;
+  font-family: var(--chrome); letter-spacing: .02em;
+}
+.composer #stop-btn:hover { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.composer #stop-btn:disabled { opacity: .5; cursor: default; }
+
+/* ---------- themed scrollbars (Direction D) ---------- */
+* { scrollbar-width: thin; scrollbar-color: var(--elev) transparent; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--elev); border-radius: 8px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent) 60%, var(--elev));
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--accent); background-clip: content-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
 /* ---------- right rail: plan tracker + counters ---------- */
 .plan { margin: 0 0 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .step {
