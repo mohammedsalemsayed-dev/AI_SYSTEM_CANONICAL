@@ -7,6 +7,13 @@ recovery, memory trust, controlled learning, hardware protection, and model rout
 The core idea: **run the work on a local model when it can, escalate to a cloud model when
 it can't — automatically, and never ship an unverified change.**
 
+![demo](docs/demo.gif)
+
+*A real `run_task --full` run: local `qwen3:8b` interprets, plans (with a Creative-agent
+brainstorm) and edits; its diff **fails T0 verification**; the orchestrator **auto-escalates
+to cloud Claude**; that diff **passes in the Docker sandbox**; the task completes verified
+and the fix is written back. Rebuild the GIF with `python docs/make_demo.py`.*
+
 - Running code: [`milestone_b/`](milestone_b/) — the live build.
 - Design package: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) (§13 is the map),
   [`02_CONTEXT_AND_TRACEABILITY/`](02_CONTEXT_AND_TRACEABILITY/) (requirement → milestone → status).
