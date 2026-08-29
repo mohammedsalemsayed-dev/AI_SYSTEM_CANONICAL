@@ -42,10 +42,33 @@ _CHANGE_VERB_RE = _re.compile(
 )
 _QA_OVERRIDABLE = {"code_edit_local", "code_edit_broad", "debug", "ops"}
 
+# "make/write/export a <deck|word doc|report|pdf|brief|...>" is an authoring
+# deliverable, not a code edit — the model sometimes files it as code_edit_broad
+# (esp. a follow-up like "now also export a PDF brief"). Deterministic nudge.
+_AUTHORING_RE = _re.compile(
+    r"\b(make|create|write|draft|generate|export|produce|prepare|put together|build)\b"
+    r"[^.]{0,50}?\b(slide\s?deck|slides?|deck|presentation|power\s?point|pptx|keynote|"
+    r"word\s+(?:doc|document|report|file)|docx|\breport\b|pdf|brief|white\s?paper|memo|"
+    r"essay|proposal|one[-\s]?pager|hand\s?out)\b",
+    _re.IGNORECASE,
+)
+# ...unless it's clearly about writing CODE that produces such a thing
+_AUTHORING_CODE_GUARD = _re.compile(
+    r"\b(function|classes?|scripts?|module|codebase|api|endpoint|library|package|"
+    r"unit\s?test|parser|renderer|generator\s+class)\b",
+    _re.IGNORECASE,
+)
+_AUTHORING_OVERRIDABLE = {"code_edit_local", "code_edit_broad", "debug", "ops"}
+
 
 def _looks_like_question(text: str) -> bool:
     t = (text or "").strip()
     return bool(_QUESTION_RE.match(t)) and not _CHANGE_VERB_RE.search(t)
+
+
+def _looks_like_authoring(text: str) -> bool:
+    t = (text or "")
+    return bool(_AUTHORING_RE.search(t)) and not _AUTHORING_CODE_GUARD.search(t)
 
 INTERPRETER_SYSTEM = """You are the Interpreter / Intent Compiler of an autonomous coding system.
 Compile the user's request into a Task Contract. Do NOT change the objective — compile it, don't rewrite it.
@@ -103,6 +126,12 @@ class Interpreter:
         # deterministic override: a plain question should never go down the build path
         if task_class in _QA_OVERRIDABLE and _looks_like_question(request_text):
             task_class = "qa_explain"
+        # deterministic override: "make/export a deck / word doc / pdf / report"
+        # is an authoring deliverable, not a code edit
+        elif (task_class in _AUTHORING_OVERRIDABLE
+              and _looks_like_authoring(request_text)
+              and not _looks_like_question(request_text)):
+            task_class = "authoring"
 
         success = [str(x) for x in data.get("success_criteria", [])]
         evidence = [str(x) for x in data.get("required_evidence", [])]

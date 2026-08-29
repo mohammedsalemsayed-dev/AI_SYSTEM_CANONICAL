@@ -51,7 +51,7 @@ def test_missing_required_evidence_is_a_problem() -> None:
 )
 def test_evidence_without_a_pytest_t0_target_is_a_problem(evidence) -> None:
     problems = validate_contract(_contract(required_evidence=evidence))
-    assert any("pytest T0 target" in p for p in problems)
+    assert any("no runnable T0 target" in p for p in problems)
 
 
 @pytest.mark.parametrize(
@@ -63,6 +63,21 @@ def test_evidence_without_a_pytest_t0_target_is_a_problem(evidence) -> None:
     ],
 )
 def test_evidence_with_a_pytest_t0_target_passes(evidence) -> None:
+    assert validate_contract(_contract(required_evidence=evidence)) == []
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        ["T0: godot res://test/run_tests.gd passes"],
+        ["T0: godot gut test/unit passes"],
+        ["T0: android gradle :app:testDebugUnitTest passes"],
+        ["T0: unreal automation MyGame.Jump passes"],
+    ],
+)
+def test_engine_t0_targets_are_accepted(evidence) -> None:
+    # the desktop runner swaps in GodotVerifier / AndroidVerifier / UnrealVerifier
+    # per project — their evidence lines must not be rejected as unverifiable
     assert validate_contract(_contract(required_evidence=evidence)) == []
 
 

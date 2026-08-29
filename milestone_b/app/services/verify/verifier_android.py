@@ -110,7 +110,7 @@ class AndroidVerifier:
                 cmd.append("--offline")
             try:
                 proc = subprocess.run(cmd, cwd=ws, capture_output=True, text=True,
-                                      timeout=_TIMEOUT_S)
+                                      encoding="utf-8", errors="replace", timeout=_TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 return fail(f"gradle run timed out after {_TIMEOUT_S}s")
             except OSError as exc:

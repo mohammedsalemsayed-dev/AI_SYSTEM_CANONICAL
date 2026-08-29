@@ -1878,7 +1878,8 @@ class Orchestrator:
 
     _FORMAT_HINTS = (
         ("pptx", ("powerpoint", "power point", ".pptx", "pptx", "slide deck", "slides", "deck", "presentation")),
-        ("docx", ("word document", "word doc", "ms word", ".docx", "docx", " a word ", "in word")),
+        ("docx", ("word document", "word doc", "word report", "word file", "ms word",
+                  ".docx", "docx", " a word ", "in word", "as word", "as a word")),
         ("pdf", (".pdf", " pdf ", "pdf file")),
         ("html", (".html", "web page", "html page")),
         ("md", ("markdown", ".md")),
@@ -1909,9 +1910,14 @@ class Orchestrator:
         from app.services.authoring.render import RendererUnavailable, get_renderer
         from app.services.authoring.theme import theme_for_brief
 
-        brief = contract.objective or request_text
-        fmt = self._authoring_format(brief)
-        theme = theme_for_brief(brief)
+        # strip the session-context / engine preamble so a stale "Word report"
+        # or "deck" from an earlier turn can't override *this* instruction's
+        # "PDF" / "slides" (follow-ups like "now also export a PDF brief")
+        cur = re.sub(r"\[Session context.*?\]\s*", "", request_text, flags=re.S)
+        cur = re.sub(r"\[This is an? .*?\]\s*", "", cur, flags=re.S).strip()
+        brief = contract.objective or cur
+        fmt = self._authoring_format(f"{contract.objective}  {cur}")
+        theme = theme_for_brief(f"{contract.objective}  {cur}")
         # any images in the workspace (usually chat attachments) are candidates
         # for the deck's image-layout slides
         imgs: list[str] = []

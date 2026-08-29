@@ -38,7 +38,8 @@ CmdRunner = Callable[[list[str], int], _Cmd]
 def _real_cmd(argv: list[str], timeout_s: int) -> _Cmd:
     try:
         p = subprocess.run(
-            argv, capture_output=True, text=True, timeout=timeout_s
+            argv, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout_s
         )
         return _Cmd(p.returncode, p.stdout, p.stderr)
     except subprocess.TimeoutExpired as exc:
