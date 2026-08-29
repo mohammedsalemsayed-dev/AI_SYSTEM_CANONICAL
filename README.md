@@ -1,75 +1,231 @@
 # Autonomous Hardware-Aware Multi-Agent AI System
 
-Design package + working implementation foundation for a modular-monolith desktop AI
-workstation: specialized agents reason and challenge each other while deterministic services
-own state, permissions, execution boundaries, verification, recovery, memory trust,
-controlled learning, hardware protection, and model routing.
+A modular-monolith desktop AI workstation: specialised LLM agents propose and reason,
+**deterministic services enforce** — state, permissions, execution boundaries, verification,
+recovery, memory trust, controlled learning, hardware protection, and model routing.
 
-- **Start here:** [`00_START_HERE/README_FOR_CLAUDE_CODE.md`](00_START_HERE/README_FOR_CLAUDE_CODE.md) (read order + authority rules)
-- **Architecture wiring:** [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) (16 sections; §13 is the document map)
-- **Requirement → milestone → status:** [`02_CONTEXT_AND_TRACEABILITY/REQUIREMENT_TRACEABILITY.md`](02_CONTEXT_AND_TRACEABILITY/REQUIREMENT_TRACEABILITY.md)
-- **Honest built-vs-active boundary:** [`02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md`](02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md)
-- **Running code:** [`milestone_b/`](milestone_b/README.md) — the live build (see its README for per-milestone detail and run instructions)
+The core idea: **run the work on a local model when it can, escalate to a cloud model when
+it can't — automatically, and never ship an unverified change.**
 
-> The authoritative documents describe the **complete** target system. The code is a
-> foundation built through integrated vertical slices — every deferred subsystem is present
-> as a **named seam** (interface + stub), never silently dropped. "Foundation" ≠ "complete."
+- Running code: [`milestone_b/`](milestone_b/) — the live build.
+- Design package: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) (§13 is the map),
+  [`02_CONTEXT_AND_TRACEABILITY/`](02_CONTEXT_AND_TRACEABILITY/) (requirement → milestone → status).
+- Honest boundary: [`02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md`](02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md).
+- Real-run findings: [`milestone_b/REAL_RUN_FINDINGS.md`](milestone_b/REAL_RUN_FINDINGS.md),
+  [`milestone_b/BUILDER_BENCH.md`](milestone_b/BUILDER_BENCH.md),
+  [`milestone_b/LOCAL_FIRST_BENCH_REAL.md`](milestone_b/LOCAL_FIRST_BENCH_REAL.md),
+  [`milestone_b/POSTGRES_NOTES.md`](milestone_b/POSTGRES_NOTES.md).
 
-## Milestone status
+---
 
-Build order and dependencies: [`DESIGN_TIGHTENING.md`](DESIGN_TIGHTENING.md) §10.
+## Setup
+
+All commands run from `milestone_b/`.
+
+### 1. Python (required)
+
+```bash
+cd milestone_b
+python -m pip install -e .                 # base: pydantic only
+python -m pip install -e ".[llm]"          # + anthropic + claude-agent-sdk (real Claude)
+python -m pip install -e ".[postgres]"     # + psycopg (durable event store; optional)
+```
+
+Runs on Python 3.12+. The offline test suite needs nothing but `pydantic`.
+
+### 2. Docker (for real verification)
+
+`VerifierT0` runs the target tests inside a sandbox container. Build the image once:
+
+```bash
+docker build -t slice-sandbox:pytest app/services/sandbox/images/pytest-runner
+```
+
+Without Docker the suite falls back to a subprocess runner (not isolation — dev only).
+
+### 3. Cloud model (subscription, no per-token spend)
+
+The default `agent_sdk` provider uses the `claude` CLI's OAuth session:
+
+```bash
+claude          # run once to log in; then the system uses it, no API key
+```
+
+Set `SLICE_LLM=anthropic` + `ANTHROPIC_API_KEY` in `milestone_b/.env.local` to use the
+billed Messages API instead.
+
+### 4. Local models (Ollama)
+
+```bash
+winget install Ollama.Ollama            # or https://ollama.com
+ollama pull qwen3:8b                    # general: interpret / plan / critic / builder
+ollama pull qwen2.5-coder:7b            # optional comparison model
+```
+
+`qwen3:8b` (~5 GB Q4) fits an 8 GB GPU with room for context. See the benchmark below for
+why it's the pick.
+
+### 5. Postgres (optional — durable, multi-session store)
+
+```bash
+docker run -d --name nexus-pg -e POSTGRES_PASSWORD=nexus -e POSTGRES_USER=nexus \
+  -e POSTGRES_DB=nexus -p 5433:5432 postgres:17-alpine
+```
+
+Then pass `--db postgres://nexus:nexus@localhost:5433/nexus` (or set `NEXUS_DB_URL`).
+SQLite is the zero-dependency default.
+
+### 6. Desktop app (optional)
+
+Needs Node 18+, Rust (`rustup`), and the platform toolchain (Windows: MSVC "Desktop
+development with C++"; macOS: Xcode CLT; Linux: `webkit2gtk-4.1` et al.), plus PyInstaller.
+
+```bash
+python -m pip install pyinstaller
+python desktop/build.py
+```
+
+Produces installers under `desktop/src-tauri/target/release/bundle/`. On this repo's Windows
+host that yields `NEXUS_0.1.0_x64-setup.exe` (NSIS) + `.msi` (WiX), each bundling the Tauri
+shell plus the frozen `nexus-server` control-plane sidecar. Launch-verified.
+
+---
+
+## Run it
+
+### Offline sanity
+
+```bash
+python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault
+python -m app.cli.demo                     # scripted end-to-end, no network
+```
+
+### A real task
+
+```bash
+# fully local: qwen3:8b interprets, plans, edits; cloud only if it fails verification
+python -m app.cli.run_task "Fix the off-by-one in paginate()." \
+  --workspace /path/to/repo --full --apply
+
+# local plan, cloud builder (fastest reliable mix)
+python -m app.cli.run_task "<request>" --workspace <repo> --local --apply
+```
+
+`--full` wires the complete roster: Interpreter, Planner, **Creative/Brainstorm agent**,
+local-first Builder + cloud fallback, Critic, independent T2 verifier (on cloud), Router +
+provider registry, memory / experience / role-performance, the tool-adapter registry, and
+the §14.1 per-file policy gate. `--apply` writes the verified diff back (only on
+`COMPLETED` + a passing verification). `--db postgres://…` for durable storage.
+
+The deterministic layers (Router, Hardware Scheduler, Policy Engine, Progress/Loop
+Detector) never call an LLM and are always on.
+
+### Desktop shell
+
+```bash
+python -m app.ui.run_ui --db slice.db --port 8770     # -> http://127.0.0.1:8770
+```
+
+---
+
+## Benchmark results
+
+Every model runs through the **real `LocalBuilder`** agentic loop (Ollama tool-calling:
+`read_file` / `write_file` / `edit_file` / `run_tests` / `finish`); every diff is
+independently re-applied to a clean checkout and re-tested. `fixed` = diffs the harness
+verified, not the model's self-report.
+
+### Local Builder — model comparison (`BUILDER_BENCH.md`, 10 seeded one-line bugs)
+
+| model | fixed | tool-call valid | avg turns | avg wall | avg tokens |
+|---|---|---|---|---|---|
+| **qwen3:8b** | **9 / 10** | 1.00 | 6.9 | 6.8 s | 8.4 k |
+| qwen2.5-coder:7b | 6 / 10 | 0.97 | 11.9 | 16.3 s | 21 k |
+| llama3.1:8b | 2 / 10 | 0.99 | 17.2 | 55.9 s | 27 k |
+
+The coding-specialist lost; `qwen3:8b` is the local model for every role. `llama3.1:8b`
+emits valid tool syntax but can't drive the task (hits the turn cap 60 % of the time).
+
+### End-to-end, full stack — real library bugs (`LOCAL_FIRST_BENCH_REAL.md`)
+
+5 actual `more-itertools` fix commits (source reverted, test kept; `more.py` ≈ 4 000 lines),
+run through the whole pipeline with local-first → cloud escalation:
+
+| | one-line seeded bugs | **real library bugs** |
+|---|---|---|
+| solved on-device (local only) | 8–10 / 10 | **1 / 5** |
+| solved after auto-escalation to cloud | 0–2 / 10 | 3 / 5 |
+| failed | 0 | 1 / 5 (failed *safe* — cloud T2 dissent → `WAITING_FOR_USER`) |
+| **end-to-end success** | 10 / 10 | **4 / 5** |
+| time / task | 12–26 s | 2–6 min |
+
+**The measured verdict:** a local 8 B model on an 8 GB GPU solves ≈ 20 % of genuine bugs
+alone; the local-first → escalate architecture takes it to ≈ 80 %, and the last case fails
+safe to a human instead of shipping a bad fix.
+
+### Test suite
+
+**488 tests** green (`milestone_b/tests/{unit,security,integration,regression,fault}`),
+offline-deterministic, base dependency `pydantic` only. The 6 Postgres tests skip unless
+`NEXUS_PG_TEST_DSN` is set.
+
+---
+
+## Build status
+
+| Area | State |
+|---|---|
+| Milestones A–V (control plane + §10.2 capability domains + hardening) | **built** — see the table below |
+| Real Claude integration (subscription / Agent SDK) | **built + verified** |
+| Local models (Ollama: `OllamaLLM` interpret/plan, `LocalBuilder` agentic edit) | **built + benchmarked** |
+| Local-first → cloud escalation on verification failure | **built + verified** |
+| Full agent roster incl. Creative/Brainstorm agent | **built** (`run_task --full`) |
+| PostgreSQL event store (`PostgresEventLog`, `--db postgres://…`) | **built + verified** |
+| Native desktop installers (Tauri + PyInstaller sidecar) | **built** (Windows NSIS + MSI) |
+
+Not done: Alembic migrations (schema is `CREATE IF NOT EXISTS`) + connection pooling;
+the other stores (`MemoryStore` / `ExperienceStore` / `RouteStatsStore`) still on SQLite;
+Redis/queue; a secrets vault; macOS/Linux bundles; T2-verifier false-positive tuning.
+
+<details>
+<summary>Milestone table (A–V)</summary>
 
 | Milestone | Scope | Status |
 |---|---|---|
 | **A** Foundation | state machine, event log, contracts | scaffolded (prior foundation) |
-| **B** Vertical slice | `request → contract → plan → edit → T0 verify → result` on one task class | **built** — driven Builder (Claude Agent SDK), event-sourced core, Docker T0 sandbox |
+| **B** Vertical slice | `request → contract → plan → edit → T0 verify → result` | **built** |
 | **C** Security & authority | capability registry, scoped grants, 7-rule policy engine, sandbox tiers, approvals | **built** |
 | **D** Recovery & progress | checkpoints, idempotency, reconciliation, 6 hard-progress signals, loop detector, escalation ladder | **built** |
-| **E** Multi-agent | Critic (T0-first, can't false-reject), independent T2 ensemble verifier, disagreement protocol, Researcher, composition rule, RolePerformance | **built** |
-| **F** Memory & experience | hierarchical memory (working/project/experience/system), trust-filtered retrieval, context builder, full `OBSERVED→…→STALE/QUARANTINED` lifecycle, advisory retrieval at planning, catastrophic rollback | **built** |
-| **G** Routing & hardware | provider registry, static §7.1 table + escalation triggers, `RouteStatsStore` + ≥20-run eligibility + data-driven blend, hardware modes + `EMERGENCY` pause, real `stronger_model` ladder rung | **built** |
-| **I** Optimization | frozen guardrail suite, fail-closed regression gate, held-out `OfflineEval` gating promotion, experience & routing canary rollback, `rebuild_metrics` (§11.2) | **built** |
-| **H** Desktop shell | 6 §11.2 read-model folds, loopback HTTP/JSON API, SSE event stream, wired no-build frontend, opt-in gated task submit | **built** |
-| **H** Tauri packaging | Tauri v2 native shell (Rust sidecar supervision) + PyInstaller `nexus-server` sidecar + one-command build | **scaffolded** — not `cargo build`-verified here; needs a Rust + PyInstaller build host |
-| **J** Repo intelligence & Git adapter (§10.2 domain 1) | deterministic Git adapter, `ast` symbol index, import dependency graph, blast-radius `ImpactReport` (dependent modules + affected tests + risk flags), breadth advisory; impact-selected tests widen T0 | **built** |
-| **K** Research pipeline & evidence graph (§10.2 domain 2) | question decomposition, per-sub-question Researcher, evidence graph (support/agree/contradict edges), bounded cross-check, claims-only synthesis → cited `ResearchAnswer` with mandatory uncertainty; `research_web` is a first-class flow; hostile-source injection scan | **built** |
-| **L** RAG / knowledge base (§10.2 domain 3) | `KnowledgeBase` ingest + heading-aware chunking + BM25 lexical retrieval behind a `Retriever` protocol; claims-only KB answer at `doc_input` trust; `doc_analysis` is a first-class flow; research pipeline can blend library + web. A real embedding/RAG framework is the integration point behind `Retriever` (§16) | **built** |
-| **M** Authoring pipelines (§10.2 domain 4) | `DocumentModel` + `SlideDeck`; outline → KB-grounded draft (cited, `doc_input` trust) → review pass → Markdown/HTML render; `authoring` is a first-class flow. DOCX/PPTX/PDF are `Renderer` stubs — drop in python-docx / python-pptx (§16) | **built** |
-| **N** Engine adapters & expert modes (§10.2 domain 5) | Godot / Unreal / Android / generic project detection + `EngineInfo` (globs, build/test cmd, conventions) + expert prompt profiles injected at planning; engine-native build/test execution is the §5-C tier-C seam | **built** |
-| **O** Automated model selection (§10.2 domain 6) | logistic-regression `WeightSet` fit over routing features + `ModelSelectionController` flipping a `task_class` static↔data-driven, gated by the guardrail regression check and demoted on a canary rollback; `PROVISIONAL_WEIGHTS` is now the fallback. A real fit needs a scored-run corpus (offline fitter built, not run) | **built** |
-| **P** Artifact & version tracking | content-addressed `ArtifactStore` (sha-256 deduped blobs) + per-objective version chain with parent lineage + `diff_versions` + mark-never-delete archival (§11.3); the 4 deliverable paths store diff / research / KB / document artifacts at their own trust; `GET /api/artifacts/{id}` in the shell | **built** |
-| **Q** Fault injection & recovery hardening | `app/services/faults/` wrappers (raise real backend exceptions) + a hard-kill log hook; `tests/fault/` 20 cases + a matrix runner (`FAULT_FINDINGS.md`, 14/14) proving safe-terminal / workspace-untouched / clean-`reconcile()` under 13 induced failure modes; forced the `EgressBroker → EgressError` fix | **built** |
-| **R** Telemetry & target-machine calibration | live `HardwareMonitor` reading real RAM/CPU/disk + `nvidia-smi` GPU/VRAM (stdlib + `ctypes`, never raises); one-time `calibrate()` → `HardwareProfile` persisted to system memory; the profile scales the wall-clock budget; hardware sampling now runs every task independent of routing | **built** |
-| **S** Tool adapter framework (§5-C / §10.2 spine) | one `ToolAdapter` Protocol + `ToolRegistry` over the scattered §10.2 tool packages; `manifest_block()` injected at planning + `ToolDispatcher` routing every op through the **existing** Policy Engine + caller `CapabilityGrant` (no new gate); git / fs / net(egress) / engine adapters; manifest `output_trust` stamped on the result so `retrieved_web` is never laundered; a tainted side-effecting op is denied by the existing rule | **built** |
-| **T** Tool-use execution | `ShellToolAdapter` (`shell.exec` through the `SandboxRunner` seam, `tool_output` trust) + `ToolLoop` — the model picks one JSON `{op,args}` per turn, each dispatched through the S spine (= existing Policy Engine + grant), bounded by `max_iters` + a parse budget, deterministic; `ops` is now a first-class flow (`_run_tool_task` on a workspace copy, `TOOL_LOOP` event, `tool_output` transcript artifact, `T0` pass record); a policy-denied op is a transcript turn, not a stop; a tainted context can't run a side-effecting op | **built** |
-| **U** Loop detection for the tool loop | D's `LoopDetector` wired per turn into `ToolLoop` — a repeated no-progress op trips `repeated_action` / `repeated_error` and the loop stops early with `loop_risk`; `_run_tool_task` escalates that to `WAITING_FOR_USER` with a `ClarificationRequest` (mirrors the `_execute` stalled-escalation path) instead of burning the iteration cap and failing silently; a `PROGRESS` summary event; `detect_loops` opt-out; deterministic | **built** |
-| **V** Per-changed-file policy checks | opt-in `per_file_policy` re-runs the existing Policy Engine + step grant once per file in `out.changed_paths`, so the §14.1 risk-class approval gate (`*auth*` / `*/migrations/*` / `*secret*` / `*/payments/*` / `*.pem`) actually fires for the files a build touches — not just the workspace-root step proposal; a risk-class edit → `ApprovalPause` (approve/resume → `COMPLETED`), an out-of-scope / read-only-grant write → `BuildError`; no new rule or gate; off by default → byte-identical | **built** |
+| **E** Multi-agent | Critic (T0-first), independent T2 ensemble verifier, disagreement protocol, Researcher, composition rule | **built** |
+| **F** Memory & experience | hierarchical memory, trust-filtered retrieval, full experience lifecycle, catastrophic rollback | **built** |
+| **G** Routing & hardware | provider registry, static table + escalation triggers, data-driven blend, hardware modes + `EMERGENCY` pause | **built** |
+| **I** Optimization | frozen guardrail suite, fail-closed regression gate, held-out `OfflineEval` gate, canary rollback | **built** |
+| **H** Desktop shell | 6 read-model folds, loopback HTTP/JSON API, SSE stream, no-build frontend | **built** |
+| **H** Tauri packaging | Tauri v2 native shell + PyInstaller sidecar + one-command build | **built** — Windows installers produced |
+| **J** Repo intelligence & Git adapter | deterministic Git adapter, `ast` symbol index, dependency graph, blast-radius `ImpactReport` | **built** |
+| **K** Research pipeline & evidence graph | decomposition, evidence graph, bounded cross-check, claims-only cited synthesis, injection scan | **built** |
+| **L** RAG / knowledge base | ingest + heading-aware chunking + BM25 behind a `Retriever` protocol; `doc_analysis` flow | **built** |
+| **M** Authoring pipelines | `DocumentModel` + `SlideDeck`; outline → grounded draft → review → render | **built** |
+| **N** Engine adapters & expert modes | Godot / Unreal / Android / generic detection + `EngineInfo` + expert prompt profiles | **built** |
+| **O** Automated model selection | logistic-regression `WeightSet` fit + `ModelSelectionController`, regression-gated, canary-demoted | **built** |
+| **P** Artifact & version tracking | content-addressed `ArtifactStore` + per-objective version chain + mark-never-delete | **built** |
+| **Q** Fault injection & recovery hardening | fault wrappers + hard-kill hook; 20-case suite proving safe-terminal / clean-reconcile | **built** |
+| **R** Telemetry & calibration | live `HardwareMonitor` (RAM/CPU/disk + `nvidia-smi`) + one-time `calibrate()` → budget scaling | **built** |
+| **S** Tool adapter framework | `ToolAdapter` Protocol + `ToolRegistry` + `ToolDispatcher` through the existing Policy Engine | **built** |
+| **T** Tool-use execution | `ShellToolAdapter` + bounded deterministic `ToolLoop`; `ops` is a first-class flow | **built** |
+| **U** Loop detection for the tool loop | D's `LoopDetector` per turn → early `loop_risk` stop → escalate to the user | **built** |
+| **V** Per-changed-file policy checks | `per_file_policy` re-runs the Policy Engine per touched file so the §14.1 risk-class gate actually fires | **built** |
 
-**471 tests** green (`milestone_b/`, offline-deterministic; one runtime dependency: `pydantic`). **All six §10.2 capability domains are FOUNDATION, behind one §5-C tool-dispatch spine with a bounded, loop-guarded tool-use loop and per-file policy enforcement.**
+</details>
 
-### Needs an external resource (built, not run here)
-
-| Harness | Command | Needs |
-|---|---|---|
-| Premise test | `python -m tests.premise.run_real_tasks …` | Claude Pro subscription (`claude` CLI login) |
-| Single-vs-multi benchmark | `python -m tests.benchmark.run_multiagent_bench …` | subscription — gates the Critic promote-to-default decision |
-| Model eligibility seeder | `python -m tests.benchmark.seed_model …` | subscription |
-| Guardrail regression runner | `python -m tests.regression.run_guardrail` (`--offline` works now) | subscription for the real-model run |
-| Routing-weight fitter | `python -m tests.benchmark.fit_weights --write` | a populated `RouteStatsStore` (run the seeder first, on the subscription) |
-| Native installers | `python desktop/build.py` | Rust toolchain + PyInstaller + platform build tools (+ signing certs) |
-
-## Quick start (the running slice)
-
-```bash
-cd milestone_b
-python -m pytest tests/unit tests/security tests/integration tests/regression tests/fault   # 471 green
-python -m app.cli.demo                                                          # offline end-to-end
-python -m app.ui.run_ui --db slice.db --port 8770                               # desktop shell -> http://127.0.0.1:8770
-```
+---
 
 ## Non-negotiable rules
 
-- The Complete Claude-Code Spec is the primary authoritative source; summaries never replace it.
-- Do not silently drop a requirement because it is not yet implemented.
-- Do not confuse "planned" or "foundation" with "complete."
-- Do not bypass security or verification for convenience.
+- LLMs propose and reason; deterministic components enforce. An LLM is never the final
+  authority for permissions, verification, or hardware limits.
+- Never ship a change that has not passed independent verification.
+- `retrieved_web` / `doc_input` content can never originate a side effect, change the
+  objective, or widen a capability (§12).
+- "Foundation" / "seam" ≠ "complete" — deferred subsystems are present as named interfaces,
+  never silently dropped.
