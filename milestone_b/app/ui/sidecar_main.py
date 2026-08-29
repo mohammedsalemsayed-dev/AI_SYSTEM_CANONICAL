@@ -39,12 +39,22 @@ def main(argv: list[str]) -> int:
 
     Path(db).parent.mkdir(parents=True, exist_ok=True)
 
+    # reap our own leaked temp dirs from previous (hard-killed) runs
+    try:
+        from app.ui.tmpsweep import sweep_stale_tempdirs
+
+        n = sweep_stale_tempdirs()
+        if n:
+            print(f"tmp sweep: removed {n} stale dir(s)", flush=True)
+    except Exception:  # noqa: BLE001 — housekeeping must never block startup
+        pass
+
     allow_submit = args.allow_submit or os.environ.get("NEXUS_ALLOW_SUBMIT") == "1"
     runner = None
     if allow_submit:
-        from app.ui.run_ui import _build_runner
+        from app.ui.runner import build_task_runner
 
-        runner = _build_runner(db)
+        runner = build_task_runner(db)
 
     srv = serve(db, host=args.host, port=args.port, runner=runner)
     print(

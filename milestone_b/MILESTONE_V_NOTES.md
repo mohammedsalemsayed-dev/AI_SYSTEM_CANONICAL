@@ -48,6 +48,12 @@ files.
   `ScriptedBuilder` / `AgentSDKBuilder` / every test). V gets the security property — every
   file seen by the engine — without that rewrite; the write is checked from `changed_paths`
   after the fact, on the discardable copy, before anything is verified or promoted.
+  Because the Builder is not step-scoped, a recovery / escalation re-plan that leads with an
+  `fs.read` "inspect" step gets the plan's writes attributed to that read step. `_run_step`
+  compensates: when the current step's grant lacks `file.write`, the per-file pass runs
+  against `_plan_file_grant` — a grant over the union of the *current plan's* step
+  capabilities (logged as its own `CAPABILITY_GRANT`, `step_id="plan"`). Risk-class,
+  path-scope and taint checks are unchanged; a plan with no write step anywhere still DENYs.
 - **Per-file approval granularity** — approval is step-scoped: approving the step approves
   all its files. A follow-up can thread a `{step_id: {path}}` set.
 - **Content inspection** (secret scanning, license headers, diff linting) — a verifier-tier

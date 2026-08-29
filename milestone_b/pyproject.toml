@@ -23,6 +23,8 @@ api = ["fastapi>=0.115", "uvicorn[standard]>=0.30"]
 # durable multi-session event store; SQLite stays the default (stdlib, no dep).
 # select Postgres with --db 'postgres://…' or NEXUS_DB_URL. See app/events/pg_log.py.
 postgres = ["psycopg[binary]>=3.2"]
+# authoring task class — DOCX / PPTX renderers (Milestone M seam) + attachment PDF text
+authoring = ["python-docx>=1.1", "python-pptx>=0.6.23", "pypdf>=4.0"]
 dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]

@@ -100,6 +100,12 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
     orch.research = ResearchPipeline(researcher, lllm)
     wired += ["researcher", "research_pipeline"]
 
+    # --- authoring pipeline (M) — DOCX / PPTX / PDF / MD deliverables ---- #
+    from app.services.authoring.pipeline import AuthoringPipeline
+
+    orch.authoring = AuthoringPipeline(lllm)  # renderer chosen per-task from the brief
+    wired.append("authoring(docx,pptx,md,html)")
+
     # --- tool adapter registry (S) — enumerated at planning, policy-gated #
     treg = (ToolRegistry()
             .register(FsToolAdapter())
@@ -113,8 +119,53 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
             treg.register(GitToolAdapter(GitAdapter(workspace)))
         except Exception:  # noqa: BLE001 — not a git repo / git missing
             pass
+
+        # external MCP servers declared by the project's own .mcp.json
+        # (e.g. an Unreal-editor MCP) — registered only when reachable now.
+        mcp_json = Path(workspace) / ".mcp.json"
+        if mcp_json.is_file():
+            from app.services.tools.adapters.mcp_tool import from_mcp_json
+
+            for ad in from_mcp_json(str(mcp_json)):
+                if ad.available():
+                    treg.register(ad)
+                    wired.append(f"{ad.name}({len(ad.manifest().ops)} ops)")
     orch.tools = treg
     wired.append("tools(" + ",".join(a.name for a in treg.all()) + ")")
+
+    # --- engine registry (N) — engine-aware expert context at planning - #
+    # detect(root) resolves Godot / Unreal / Android / generic; the orchestrator
+    # folds the adapter's expert profile + test command into the planner prompt.
+    from app.services.engines.registry import EngineRegistry
+
+    orch.engines = EngineRegistry()
+    wired.append("engines(godot,unreal,android,generic)")
+
+    # --- bounded tool-use loop (T) — the `ops` deliverable path -------- #
+    # one policy-checked tool call per turn, on a workspace copy. Uses the same
+    # ToolRegistry (so project .mcp.json ops are reachable) and Policy Engine.
+    from app.services.tools.dispatch import ToolDispatcher
+    from app.services.tools.loop import ToolLoop
+
+    _dispatcher = ToolDispatcher(
+        treg, orch.policy, risk_globs=getattr(orch.policy, "risk_globs", None)
+    )
+    orch.tool_loop = ToolLoop(_dispatcher, lllm)
+    wired.append("tool_loop")
+
+    # --- fitted model selection (O) — data-driven routing weights ----- #
+    # inert until a task_class has >= MIN_ELIGIBLE_MODELS of route history;
+    # then the Router consults learned weights instead of the static table.
+    from app.services.routing.selection import ModelSelectionController
+
+    orch.selection = ModelSelectionController(mem, stats, reg)
+    wired.append("selection")
+
+    # --- knowledge base (L) — persistent doc library for doc_analysis - #
+    from app.services.kb.store import KnowledgeBase
+
+    orch.kb = KnowledgeBase(str(base.with_suffix(".kb.db")))
+    wired.append("kb")
 
     # --- §14.1 per-changed-file policy gate (V) — ON in the full stack -- #
     orch.per_file_policy = per_file_policy

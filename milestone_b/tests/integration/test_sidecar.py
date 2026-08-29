@@ -70,10 +70,18 @@ def test_sidecar_submit_is_off_by_default(sidecar) -> None:
 
 
 def test_build_script_reports_missing_toolchain() -> None:
-    # this environment has no cargo/pyinstaller: build.py must fail cleanly, not crash
+    # run with a stripped PATH so a prerequisite (cargo/npm) is *definitely*
+    # missing regardless of the host — build.py must fail cleanly, not crash or
+    # start an actual build.
+    minimal = os.pathsep.join(
+        p for p in (str(Path(sys.executable).parent),
+                    r"C:\Windows\System32", r"C:\Windows", "/usr/bin", "/bin")
+        if Path(p).exists()
+    )
     r = subprocess.run(
         [sys.executable, str(_REPO / "desktop" / "build.py")],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=60,
+        env={**os.environ, "PATH": minimal},
     )
-    assert r.returncode == 2
+    assert r.returncode == 2, (r.stdout + r.stderr)[:800]
     assert "missing prerequisite" in r.stderr

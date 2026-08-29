@@ -146,8 +146,8 @@ def test_submit_disabled_by_default_then_enabled(tmp_path: Path) -> None:
 
     calls = []
 
-    def fake_runner(request: str, workspace: str):
-        calls.append((request, workspace))
+    def fake_runner(request: str, workspace: str, apply: bool = True, attachments=None):
+        calls.append((request, workspace, apply))
         return TaskResult(task_id="tX", state="COMPLETED", verified=True, summary="ok")
 
     rw = UIServer(("127.0.0.1", 0), db_path=db, runner=fake_runner)
@@ -158,5 +158,5 @@ def test_submit_disabled_by_default_then_enabled(tmp_path: Path) -> None:
     with _urlopen(req) as r:
         assert r.status == 201
         assert json.loads(r.read())["submitted"]["state"] == "COMPLETED"
-    assert calls == [("do x", "/ws")]
+    assert calls == [("do x", "/ws", True)]  # apply defaults on
     rw.shutdown()

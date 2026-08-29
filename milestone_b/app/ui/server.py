@@ -68,7 +68,17 @@ class _Handler(BaseHTTPRequestHandler):
         path, q = u.path, parse_qs(u.query)
         try:
             if path == "/api/health":
-                return self._json({"status": "ok", "ts": time.time()})
+                out = {
+                    "status": "ok", "ts": time.time(),
+                    "submit_enabled": self.server.runner is not None,  # type: ignore[attr-defined]
+                }
+                try:
+                    from app.ui.runner import run_status
+                    if self.server.runner is not None:  # type: ignore[attr-defined]
+                        out["run"] = run_status()
+                except Exception:  # noqa: BLE001
+                    pass
+                return self._json(out)
             if path == "/api/stream":
                 return self._stream(q)
             if path.startswith("/api/"):
@@ -83,7 +93,8 @@ class _Handler(BaseHTTPRequestHandler):
                 pass
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path.rstrip("/") != "/api/tasks":
+        route = self.path.rstrip("/")
+        if route not in ("/api/tasks", "/api/settings", "/api/attachments"):
             return self._json({"error": "not found"}, status=404)
         runner = self.server.runner  # type: ignore[attr-defined]
         if runner is None:
@@ -95,11 +106,34 @@ class _Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
             return self._json({"error": "bad json"}, status=400)
+
+        if route == "/api/settings":
+            try:
+                from app.ui.runner import set_settings
+                return self._json(set_settings(body if isinstance(body, dict) else {}))
+            except Exception as exc:  # noqa: BLE001
+                return self._json({"error": repr(exc)}, status=500)
+
+        if route == "/api/attachments":
+            ws = (body.get("workspace") or "").strip()
+            if not ws:
+                return self._json({"error": "workspace required"}, status=400)
+            try:
+                from app.ui.attachments import save_attachments
+                saved = save_attachments(ws, body.get("files") or [])
+                return self._json({"saved": saved})
+            except Exception as exc:  # noqa: BLE001
+                return self._json({"error": repr(exc)}, status=500)
+
         req, ws = body.get("request", "").strip(), body.get("workspace", "").strip()
         if not req or not ws:
             return self._json({"error": "request and workspace are required"}, status=400)
-        result = runner(req, ws)
+        apply = bool(body.get("apply", True))
+        attach = body.get("attachments") or []
+        result = runner(req, ws, apply, attach)
         payload = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        if isinstance(payload, dict) and payload.get("error"):
+            return self._json({"error": payload["error"]}, status=400)
         return self._json({"submitted": payload}, status=201)
 
     # -- handlers ------------------------------------------------ #
@@ -109,8 +143,34 @@ class _Handler(BaseHTTPRequestHandler):
             parts = [p for p in path.split("/") if p]  # ["api", ...]
             if parts == ["api", "tasks"]:
                 return self._json(readmodels.task_list(log))
+            if parts == ["api", "sessions"]:
+                return self._json(readmodels.session_list(log))
+            if len(parts) == 3 and parts[:2] == ["api", "sessions"]:
+                st = readmodels.session_timeline(log, parts[2])
+                return self._json(st) if st else self._json({"error": "no such session"}, 404)
+            if parts == ["api", "settings"]:
+                try:
+                    from app.ui.runner import get_settings
+                    return self._json(get_settings())
+                except Exception:  # noqa: BLE001
+                    return self._json({})
             if parts == ["api", "system"]:
-                return self._json(readmodels.system_health(log))
+                out = readmodels.system_health(log)
+                # take a FRESH live sample so the UI's poll shows current
+                # cpu/ram/gpu/temp, not whatever the last orchestrator event held
+                try:
+                    from app.services.hardware.telemetry import read_telemetry
+                    s = read_telemetry(".")
+                    if s.source.startswith("live"):
+                        out["hardware_live"] = {
+                            "cpu_percent": s.cpu_percent, "ram_percent": s.ram_percent,
+                            "disk_free_percent": s.disk_free_percent,
+                            "gpu_temp_c": s.gpu_temp_c, "gpu_percent": s.gpu_percent,
+                            "vram_percent": s.vram_percent, "source": s.source,
+                        }
+                except Exception:  # noqa: BLE001 — telemetry is best-effort
+                    pass
+                return self._json(out)
             if parts == ["api", "metrics"]:
                 return self._json(readmodels.metrics_panel(log))
             if parts == ["api", "routes"]:

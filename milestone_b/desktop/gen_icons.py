@@ -16,9 +16,9 @@ from PIL import Image, ImageDraw
 
 HERE = Path(__file__).parent
 ICONS = HERE / "src-tauri" / "icons"
-BG = (11, 15, 20, 255)      # --bg from style.css
-ACCENT = (79, 209, 197, 255)  # --accent
-INK = (214, 224, 234, 255)
+BG = (10, 14, 23, 255)      # --bg from style.css
+ACCENT = (109, 124, 255, 255)  # --accent
+INK = (205, 214, 228, 255)   # --ink
 
 
 def _base(size: int) -> Image.Image:

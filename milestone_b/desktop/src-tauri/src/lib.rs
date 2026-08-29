@@ -52,6 +52,9 @@ pub fn run() {
                     &PORT.to_string(),
                     "--db",
                     db.to_str().expect("non-utf8 db path"),
+                    // the shell is a working tool, not just a viewer: the Run box
+                    // submits real tasks (local-first, cloud escalation on failure)
+                    "--allow-submit",
                 ])
                 .spawn()
                 .expect("failed to spawn nexus-server");

@@ -72,15 +72,27 @@ _TOOLS = [
 
 _SYSTEM = """You are the Builder in an autonomous coding system. You work ONLY inside the given repository, by calling tools.
 
-Do this in order:
-1. read_file the verification test file. Note EXACTLY what it asserts — return values, exact exception types and message strings, edge cases, and which dict keys / attributes it uses.
-2. read_file the SOURCE module under test. You must see the real current code before changing it — never guess its contents.
+FIX an existing failing test — do this in order:
+1. read_file the verification test file. Note EXACTLY what it asserts — return values, exact exception types and message strings, edge cases, dict keys / attributes.
+2. read_file the SOURCE module under test. See the real current code before changing it — never guess.
 3. Make the SMALLEST source change that makes the test pass as written. Never edit the test file.
-4. Prefer write_file with the full corrected file. (edit_file(path, old, new) also exists for a surgical replace, but only if you copy `old` verbatim from a read_file.)
-5. call run_tests. If it fails, read the failure carefully and change the source again.
+4. Prefer write_file with the full corrected file. (edit_file(path, old, new) is for a surgical replace — only if you copy `old` verbatim from a read_file.)
+5. call run_tests. If it fails, read the failure and change the source again.
 6. When run_tests reports PASS, call finish.
 
-Call exactly one tool per turn. Never answer in prose."""
+CREATE from scratch — if read_file on the test target returns "DOES NOT EXIST", or the objective asks you to create/make/build a new file:
+1. write_file the implementation module named in the OBJECTIVE (e.g. calculator.py) with complete, working code.
+2. If the VERIFICATION TARGET names a test file that does not exist, write_file that test file too:
+   - `import pytest` and the module under test at the top.
+   - plain `assert` for values; for exceptions use `with pytest.raises(ValueError): ...`.
+   - NEVER write `assert x raises Y` — that is not Python.
+   - Assert ONLY the plain behaviour the OBJECTIVE states. Do NOT invent edge cases
+     (odd whitespace, huge inputs, extra error messages) that you then cannot satisfy.
+     3-5 straightforward assertions is enough.
+3. call run_tests, fix what it reports, then finish. If two run_tests in a row still fail, finish anyway — a later stage will verify.
+Do NOT keep calling list_dir for files that are not there — if a path does not exist, create it.
+
+Call exactly one tool per turn. Never answer in prose. At most ONE list_dir call total — you rarely need it."""
 
 
 @dataclass
@@ -151,17 +163,27 @@ class LocalBuilder:
     def _loop(self, step: PlanStep, contract: TaskContract, ws: str) -> None:
         root = Path(ws).resolve()
         target = extract_pytest_target(contract.required_evidence) or ""
+        target_file = target.split("::")[0].split()[0] if target else ""
+        target_exists = bool(target_file) and (root / target_file).is_file()
+        mode = (
+            f"The verification target file {target_file!r} EXISTS — read it first, then fix the source."
+            if target_exists else
+            "The verification target file does NOT exist yet. This is a CREATE task: "
+            "write_file the implementation module from the OBJECTIVE now, then (if needed) "
+            "write_file the test file, then run_tests. Do not call list_dir more than once."
+        )
         user = (
             f"OBJECTIVE\n{contract.objective}\n\nTHIS STEP\n{step.intent}\n\n"
-            f"VERIFICATION TARGET\npytest {target or '(none specified)'}\n\n"
-            "Start by reading the test file, then make the fix."
+            f"VERIFICATION TARGET\npytest {target or '(none specified)'}\n\n{mode}"
         )
         messages = [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": user},
         ]
 
-        unproductive = 0  # consecutive turns with no read + no successful edit
+        unproductive = 0   # turns with no genuinely new information / no edit
+        list_dirs = 0      # total list_dir calls — cap the exploration spiral
+        seen: set[str] = set()
         for _ in range(self.max_turns):
             self.metrics.turns += 1
             reply = self._chat(messages)
@@ -172,7 +194,7 @@ class LocalBuilder:
                 unproductive += 1
                 messages.append({"role": "tool", "content":
                                  "No valid tool call found. Reply with exactly one tool call."})
-                if unproductive >= 6:
+                if unproductive >= 5:
                     return
                 continue
 
@@ -185,13 +207,31 @@ class LocalBuilder:
             result = self._dispatch(name, args, root, target, ws)
             messages.append({"role": "tool", "name": name, "content": result[:_OUT_CAP]})
 
-            progressed = name in ("read_file", "list_dir") or self.metrics.edits > edits_before
+            made_edit = self.metrics.edits > edits_before
+            fresh_read = (
+                name == "read_file"
+                and not result.startswith(("error:", "DOES NOT EXIST"))
+                and args.get("path") not in seen
+            )
+            if name == "read_file":
+                seen.add(args.get("path"))
+            if name == "list_dir":
+                list_dirs += 1
+                if list_dirs >= 2:
+                    messages.append({"role": "user", "content":
+                        "Stop exploring. Call write_file / edit_file to make the change now."})
+
+            progressed = made_edit or fresh_read or (name == "list_dir" and list_dirs == 1)
             unproductive = 0 if progressed else unproductive + 1
-            if unproductive >= 6:  # spinning on malformed calls — stop, let verify judge
+            if unproductive >= 5:
                 return
-            if name == "run_tests" and self.metrics.tests_passed:
-                messages.append({"role": "user", "content":
-                                 "Tests pass. Call finish now."})
+            if name == "run_tests":
+                if self.metrics.tests_passed:
+                    messages.append({"role": "user", "content": "Tests pass. Call finish now."})
+                elif self.metrics.test_runs >= 4 and self.metrics.edits > 0:
+                    # churning on failures — stop and let T0 + escalation judge the
+                    # diff we already have rather than burning every turn.
+                    return
         self.metrics.hit_turn_cap = True
 
     # -- Ollama chat -------------------------------------------- #
@@ -262,9 +302,10 @@ class LocalBuilder:
             base = self._safe(root, str(args.get("path", ".")))
             if base is None or not base.exists():
                 self.metrics.bad_arg_calls += 1
-                return "error: path outside repo or missing"
+                return (f"DOES NOT EXIST: {args.get('path')!r}. Nothing to list. "
+                        "If you need this file, create it with write_file.")
             if base.is_file():
-                return base.name
+                return f"{base.name} is a file, not a directory. read_file it instead."
             files = sorted(
                 str(f.relative_to(root)).replace("\\", "/")
                 for f in base.rglob("*")
@@ -274,9 +315,13 @@ class LocalBuilder:
 
         if name == "read_file":
             p = self._safe(root, str(args.get("path", "")))
-            if p is None or not p.is_file():
+            if p is None:
                 self.metrics.bad_arg_calls += 1
-                return "error: not a readable file in the repo"
+                return "error: path is outside the repo"
+            if not p.is_file():
+                # not a hard error for a CREATE task — tell the model to make it
+                return (f"DOES NOT EXIST: {args.get('path')!r}. "
+                        "If the task needs this file, create it with write_file(path, content).")
             return p.read_text("utf-8", "replace")[:_READ_CAP]
 
         if name == "write_file":

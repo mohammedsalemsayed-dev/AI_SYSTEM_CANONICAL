@@ -76,11 +76,64 @@ def test_html_renderer_is_nested_and_escaped() -> None:
     assert '<section class="references">' in h.text
 
 
-def test_docx_renderer_stub_raises() -> None:
-    with pytest.raises(RendererUnavailable):
-        DocxRenderer().render(DocumentModel(title="x"))
-    assert isinstance(get_renderer("pptx"), type(get_renderer("pptx")))
+def test_docx_pptx_pdf_renderers_produce_valid_binaries() -> None:
+    from app.services.authoring.render import PdfRenderer, PptxRenderer
+
+    doc = _rich_doc()
+    dx = DocxRenderer().render(doc)
+    assert dx.ext == "docx" and dx.is_binary and dx.data[:2] == b"PK"  # zip/ooxml
+    assert dx.text  # a readable preview is still attached
+    px = PptxRenderer().render(doc)
+    assert px.ext == "pptx" and px.is_binary and px.data[:2] == b"PK"
+    pf = PdfRenderer().render(doc)
+    assert pf.ext == "pdf" and pf.is_binary and pf.data[:8] == b"%PDF-1.4"
+    assert pf.data.rstrip().endswith(b"%%EOF")
+
+    # re-open to prove they are well-formed
+    import io as _io
+
+    import docx as _docx
+    import pptx as _pptx
+    from pypdf import PdfReader
+    assert len(_docx.Document(_io.BytesIO(dx.data)).paragraphs) > 3
+    assert len(_pptx.Presentation(_io.BytesIO(px.data)).slides._sldIdLst) >= 2
+    assert len(PdfReader(_io.BytesIO(pf.data)).pages) >= 1
+
     assert isinstance(get_renderer("unknown"), MarkdownRenderer)
+
+
+def test_pptx_auto_visuals_when_no_images_attached(monkeypatch) -> None:
+    """With no attachments the deck still gets 'Visual —' placeholder panels on a
+    subset of plain slides, speaker notes carry an [Add an image here] marker,
+    and the file stays a valid OOXML package. NEXUS_DECK_IMAGES=0 forces the
+    offline (panel) path so the test never hits the network."""
+    import io as _io
+
+    import pptx as _pptx
+
+    from app.services.authoring.model import Block, DocumentModel, Section
+    from app.services.authoring.render import PptxRenderer
+
+    monkeypatch.setenv("NEXUS_DECK_IMAGES", "0")
+    doc = DocumentModel(title="Deck")
+    doc.sections = [
+        Section(title=f"Point {n}", blocks=[Block(kind="list", items=["a", "b", "c"])])
+        for n in range(1, 9)
+    ]
+    px = PptxRenderer().render(doc)  # no images= -> auto placeholders
+    assert px.ext == "pptx" and px.data[:2] == b"PK"
+
+    prs = _pptx.Presentation(_io.BytesIO(px.data))
+    texts = [
+        sh.text_frame.text
+        for sl in prs.slides for sh in sl.shapes if sh.has_text_frame
+    ]
+    assert any(t.startswith("Visual —") for t in texts), "no placeholder panel rendered"
+    notes = [
+        sl.notes_slide.notes_text_frame.text
+        for sl in prs.slides if sl.has_notes_slide
+    ]
+    assert any("[Add an image here" in n for n in notes)
 
 
 # --- outline ------------------------------------------- #

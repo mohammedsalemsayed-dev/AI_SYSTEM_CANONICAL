@@ -1,0 +1,247 @@
+"""In-app task runner for the desktop shell (`--allow-submit`).
+
+A **session** is a working directory. Every message you send from the shell runs
+one orchestrator task against that directory; successive messages in the same
+session are threaded — the next task is given a short context preamble built from
+the earlier tasks (their objectives and the files already changed), so it
+continues coherently instead of starting cold.
+
+No git requirement: the orchestrator works on throwaway copies it inits itself,
+and the diff is written straight back to the folder. A run takes minutes, so the
+callable validates cheaply, starts the orchestrator on a background thread, and
+returns at once — the WebView follows progress over `/api/stream`.
+One run at a time (single-user desktop).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import threading
+import time
+import traceback
+from typing import Any, Callable
+
+_LOCAL = "local:qwen3:8b"
+
+# escalation choices offered in the shell — label -> get_builder() kind string.
+# "" = the Agent SDK's own default model.
+ESCALATION_CHOICES: dict[str, str] = {
+    "sonnet": "agent_sdk:claude-sonnet-5",
+    "opus": "agent_sdk:claude-opus-5",
+    "default": "agent_sdk",
+}
+_settings: dict[str, Any] = {"escalation": "sonnet", "apply": True}
+
+
+def get_settings() -> dict[str, Any]:
+    return {**_settings, "escalation_choices": list(ESCALATION_CHOICES)}
+
+
+def set_settings(patch: dict[str, Any]) -> dict[str, Any]:
+    if "escalation" in patch and patch["escalation"] in ESCALATION_CHOICES:
+        _settings["escalation"] = patch["escalation"]
+    if "apply" in patch:
+        _settings["apply"] = bool(patch["apply"])
+    return get_settings()
+
+
+_state: dict[str, Any] = {
+    "running": False,
+    "started_ts": None,
+    "session_id": None,
+    "workspace": None,
+    "request": None,
+    "last_task_id": None,
+    "last_error": None,
+    "last_finished_ts": None,
+}
+_lock = threading.Lock()
+
+
+def session_id_for(workspace: str) -> str:
+    norm = os.path.normcase(os.path.abspath(workspace))
+    return "s_" + hashlib.sha1(norm.encode("utf-8")).hexdigest()[:12]
+
+
+def run_status() -> dict[str, Any]:
+    return dict(_state)
+
+
+# --------------------------------------------------------------------------- #
+def _session_context(db_path: str, session_id: str, workspace: str) -> str:
+    """A compact preamble from earlier tasks in this session (folder)."""
+    try:
+        from app.events.log import EventKind, open_event_log
+
+        log = open_event_log(db_path)
+        try:
+            prior: list[tuple[str, list[str]]] = []
+            for tid in log.task_ids():
+                events = log.read(tid)
+                req = next((e.payload for e in events if e.kind == EventKind.REQUEST), {})
+                if req.get("session_id") != session_id:
+                    continue
+                obj = ""
+                changed: list[str] = []
+                for e in events:
+                    if e.kind == EventKind.CONTRACT:
+                        obj = e.payload.get("objective", "") or obj
+                    elif e.kind == EventKind.ARTIFACT and e.payload.get("changed_paths"):
+                        changed = list(e.payload["changed_paths"])
+                if obj:
+                    prior.append((obj, changed))
+        finally:
+            log.close()
+    except Exception:  # noqa: BLE001
+        return ""
+
+    if not prior:
+        return ""
+    lines = ["[Session context — earlier in this working session you handled:]"]
+    for i, (obj, changed) in enumerate(prior[-6:], 1):
+        tail = f"  (touched: {', '.join(changed[:6])})" if changed else ""
+        lines.append(f"  {i}. {obj}{tail}")
+    lines.append(
+        "[This is a follow-up in the same folder. Build on that work; "
+        "do not redo it unless asked.]\n"
+    )
+    return "\n".join(lines)
+
+
+def _do_run(request: str, workspace: str, db_path: str, apply: bool,
+            session_id: str, attachments: list | None = None) -> None:
+    from app.events.log import EventKind, open_event_log
+    from app.llm import get_llm
+    from app.orchestration.orchestrator import Orchestrator
+    from app.services.build import get_builder
+    from app.services.interpret.interpreter import Interpreter
+    from app.services.plan.planner import Planner
+    from app.services.policy.engine import PolicyEngine
+    from app.services.verify.verifier_t0 import VerifierT0
+
+    log = open_event_log(db_path)
+    try:
+        from pathlib import Path
+
+        is_godot = Path(workspace, "project.godot").is_file()
+        is_unreal = any(Path(workspace).glob("*.uproject"))
+        preamble = _session_context(db_path, session_id, workspace)
+        att_note, att_kb = "", None
+        if attachments:
+            from app.ui.attachments import build_kb, describe_images, prompt_note
+
+            descs = describe_images(attachments)          # local vision model, if pulled
+            att_note = prompt_note(attachments, descs)
+            att_kb = build_kb(attachments)
+        engine_note = ""
+        if is_unreal:
+            engine_note = ("[This is an Unreal Engine project — the editor is driven over MCP "
+                           "(see .mcp.json). Verification runs UE Automation Tests via that MCP; "
+                           "keep the UE editor open with the MCP plugin running.]")
+        elif is_godot:
+            engine_note = ("[This is a Godot project — write GDScript (.gd) files, use "
+                           "`extends`/`func`/`var`; verification runs `godot --headless`.]")
+        full_request = "\n".join(x for x in (preamble, engine_note, att_note, request) if x)
+
+        local_llm = get_llm(_LOCAL)
+        # engine projects don't verify with pytest
+        verifier = VerifierT0()
+        if is_unreal:
+            from app.services.verify.verifier_unreal import UnrealVerifier
+
+            verifier = UnrealVerifier()
+        elif is_godot:
+            from app.services.verify.verifier_godot import GodotVerifier
+
+            verifier = GodotVerifier()
+        orch = Orchestrator(
+            log,
+            Interpreter(local_llm),
+            Planner(local_llm),
+            get_builder(_LOCAL),                # local-first Builder (qwen3:8b)
+            verifier,
+            PolicyEngine(),
+        )
+        esc_kind = ESCALATION_CHOICES.get(_settings["escalation"], "agent_sdk")
+        orch.fallback_builder = get_builder(esc_kind)  # escalate on verify failure
+
+        from app.cli.full_stack import wire_full_stack
+
+        # per_file_policy on (wire_full_stack default): the §14.1 risk-class gate
+        # now also applies to the files a build changed. The recovery/escalation
+        # re-drive used to lose write authority here — a re-plan leads with an
+        # `fs.read` step and the not-step-scoped Builder's writes were checked
+        # against that read grant ("operation 'file.write' is not in the
+        # capability grant"). `_plan_file_grant` now widens the per-file check to
+        # the current plan's combined step capabilities, so a re-drive allows the
+        # writes the first attempt already allowed.
+        wire_full_stack(orch, db_path=db_path, workspace=workspace, verbose=False)
+        # keep the run local when local succeeds: the (cloud) T2 ensemble only
+        # runs after an escalation, not on a clean local pass.
+        orch.t2_on_escalation_only = True
+        # document attachments become the grounding source for an authoring task,
+        # and are also folded into the persistent KB so a doc_analysis follow-up
+        # ("what does the attached spec say about X?") stays grounded next turn.
+        if att_kb is not None and orch.authoring is not None:
+            orch.authoring.kb = att_kb
+        if attachments and getattr(orch, "kb", None) is not None:
+            from app.ui.attachments import ingest_attachments
+
+            ingest_attachments(orch.kb, attachments)
+
+        # mint the task id ourselves so we can tag REQUEST with the session
+        from app.schemas.contracts import new_id
+
+        task_id = new_id("task")
+        log.append(task_id, EventKind.REQUEST, {
+            "text": request, "workspace_path": workspace, "session_id": session_id,
+            "attachments": [a.get("name") for a in (attachments or [])],
+        })
+        _state["last_task_id"] = task_id
+        result = orch._drive(task_id, full_request, workspace)  # noqa: SLF001
+
+        if apply and getattr(result, "state", "") == "COMPLETED":
+            from app.services.build.apply import apply_task_result
+
+            apply_task_result(log, result.task_id, workspace)
+    except Exception as exc:  # noqa: BLE001 — surface, don't crash the server
+        _state["last_error"] = f"{type(exc).__name__}: {exc}"
+        print("[nexus-runner] run failed:\n" + traceback.format_exc(), flush=True)
+    finally:
+        log.close()
+        with _lock:
+            _state["running"] = False
+            _state["last_finished_ts"] = time.time()
+
+
+def build_task_runner(db_path: str) -> Callable[..., dict[str, Any]]:
+    """The callable `app.ui.server` invokes for `POST /api/tasks`."""
+
+    def runner(request: str, workspace: str, apply: bool = True,
+               attachments: list | None = None) -> dict[str, Any]:
+        request = (request or "").strip()
+        workspace = os.path.abspath((workspace or "").strip())
+
+        if not request:
+            return {"error": "message is empty"}
+        if not os.path.isdir(workspace):
+            return {"error": f"folder not found: {workspace}"}
+
+        session_id = session_id_for(workspace)
+        with _lock:
+            if _state["running"]:
+                return {"error": "a run is already in progress",
+                        "session_id": _state.get("session_id")}
+            _state.update(running=True, started_ts=time.time(), session_id=session_id,
+                          workspace=workspace, request=request,
+                          last_error=None, last_task_id=None, last_finished_ts=None)
+
+        threading.Thread(
+            target=_do_run,
+            args=(request, workspace, db_path, bool(apply), session_id, attachments or []),
+            daemon=True, name="nexus-task-run",
+        ).start()
+        return {"accepted": True, "session_id": session_id, "workspace": workspace}
+
+    return runner

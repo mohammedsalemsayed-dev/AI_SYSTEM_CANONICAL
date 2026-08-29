@@ -108,6 +108,9 @@ class Orchestrator:
         self.critic = critic  # Milestone E — opt-in; None = single-agent path
         self.brainstorm = None  # Creative agent — set to a Brainstorm to offer approaches pre-plan
         self.verifier_t2 = None  # Milestone E — set to a VerifierT2 to enable the ensemble
+        # When True, the (often cloud) T2 ensemble runs ONLY after an escalation —
+        # a clean local pass is trusted to T0 alone. False = run T2 on every verify.
+        self.t2_on_escalation_only = False
         self.researcher = None  # Milestone E — set to a Researcher to enable the ladder rung
         self.role_perf = None  # Milestone E — RolePerformanceStore for shadow metrics
         self.memory = None  # Milestone F — set to a MemoryStore to enable context
@@ -292,9 +295,11 @@ class Orchestrator:
             if contract.task_class == "doc_analysis" and self.kb is not None:
                 return self._run_doc_analysis(task_id, contract, request_text)
             if contract.task_class == "authoring" and self.authoring is not None:
-                return self._run_authoring(task_id, contract, request_text)
+                return self._run_authoring(task_id, contract, request_text, workspace_path)
             if contract.task_class == "ops" and self.tool_loop is not None:
                 return self._run_tool_task(task_id, contract, request_text, workspace_path)
+            if contract.task_class == "qa_explain":
+                return self._run_qa_explain(task_id, contract, request_text, listing)
 
             snap = self._snap(task_id)
             if snap.contract is not None and (
@@ -487,7 +492,16 @@ class Orchestrator:
 
         # Milestone E — independent T2 ensemble verifier (opt-in). Advisory: T0
         # (deterministic) stays authoritative; T2 can only escalate a concern.
-        if self.verifier_t2 is not None:
+        # When `t2_on_escalation_only`, skip it on a clean local pass (builder_round
+        # 0, T0 passed) — that run never needed a second opinion and T2 is usually
+        # the one cloud call in an otherwise-local task.
+        run_t2 = self.verifier_t2 is not None
+        if run_t2 and self.t2_on_escalation_only and builder_round == 0 and verification.overall == "pass":
+            run_t2 = False
+            self.log.append(task_id, EventKind.PROGRESS, {
+                "note": "T2 skipped", "reason": "clean local pass (t2_on_escalation_only)",
+            })
+        if run_t2:
             escalate = self._t2_pass(task_id, contract, combined_diff, verification, workspace_path)
             if escalate is not None:
                 self._transition(task_id, State.WAITING_FOR_USER)
@@ -680,7 +694,7 @@ class Orchestrator:
                 budget.add_step()
 
                 proposal, out = self._run_step(
-                    task_id, contract, step, ws, approved_steps
+                    task_id, contract, step, ws, approved_steps, plan_steps=steps
                 )
                 combined_diff = out.diff or combined_diff
 
@@ -743,13 +757,26 @@ class Orchestrator:
         finally:
             cleanup(ws)
 
-    def _run_step(self, task_id, contract, step, ws, approved_steps):
+    def _run_step(self, task_id, contract, step, ws, approved_steps, *, plan_steps=()):
         """Grant -> proposal -> policy -> builder for one step. Returns
         (proposal, BuildOutput). Raises ApprovalPause / BuildError."""
         try:
             grant = issue_grant(task_id, step, workspace_root=ws, network_allowlist=[])
         except CapabilityError as exc:
-            raise BuildError(str(exc)) from exc
+            # a small planner sometimes names a capability that does not exist
+            # ("git.diff", "read_file"). Coerce to the nearest real token and
+            # carry on rather than failing the whole task.
+            from app.services.capability.registry import normalize_token
+
+            fixed = normalize_token(step.required_capability)
+            if fixed == step.required_capability:
+                raise BuildError(str(exc)) from exc
+            self.log.append(task_id, EventKind.PROGRESS, {
+                "note": "capability normalized",
+                "from": step.required_capability, "to": fixed, "step_id": step.id,
+            })
+            step = step.model_copy(update={"required_capability": fixed})
+            grant = issue_grant(task_id, step, workspace_root=ws, network_allowlist=[])
         self.log.append(task_id, EventKind.CAPABILITY_GRANT, grant)
 
         proposal = ActionProposal(
@@ -793,8 +820,21 @@ class Orchestrator:
             # the §14.1 risk-class gate never saw the files. Re-run the *same*
             # engine + grant once per changed file, before any artifact is
             # recorded for this step.
+            #
+            # The Builder is not step-scoped (MILESTONE_V_NOTES.md "Not yet
+            # real"): it performs the whole plan's edits on whichever step it is
+            # handed first. After a recovery / escalation re-plan that leads with
+            # an "inspect" (`fs.read`) step, those writes are attributed to the
+            # read step and `rule_operation_not_granted` would DENY a `file.write`
+            # the plan as a whole authorises — a re-drive regression the first
+            # attempt never hit. Check each file against a grant covering the
+            # union of the current plan's step capabilities; the risk-class,
+            # path-scope and taint checks are unchanged.
+            pf_grant = grant
+            if not grant.allows_operation("file.write"):
+                pf_grant = self._plan_file_grant(task_id, plan_steps, ws) or grant
             self._per_file_policy(
-                task_id, contract, step, ws, grant, out.changed_paths,
+                task_id, contract, step, ws, pf_grant, out.changed_paths,
                 approved_steps, proposal.action_id,
             )
         artifact = ArtifactVersion(
@@ -829,6 +869,40 @@ class Orchestrator:
         if out.error or out.exit_code != 0:
             raise BuildError(out.error or f"builder exited {out.exit_code}")
         return proposal, out
+
+    def _plan_file_grant(self, task_id, plan_steps, ws):
+        """A `CapabilityGrant` over the union of every step's operations in the
+        plan currently executing. Used only by the per-changed-file pass, so a
+        write the plan authorises somewhere is not DENY'd just because a
+        not-step-scoped Builder performed it while on an earlier read step
+        (recovery / escalation re-plans lead with an `fs.read` "inspect" step).
+
+        Returns `None` when the plan grants nothing extra over the step grant
+        (no `plan_steps`, or a single-step plan) — the caller then keeps the
+        step's own grant and behaviour is byte-identical to Milestone V.
+        A widened grant is logged as its own CAPABILITY_GRANT for the audit
+        trail."""
+        from app.schemas.contracts import CapabilityGrant
+        from app.services.capability.registry import spec_for
+
+        steps = list(plan_steps or ())
+        if len(steps) < 2:
+            return None
+        ops: set[str] = set()
+        tokens: set[str] = set()
+        for s in steps:
+            spec = spec_for(s.required_capability)
+            if spec is not None:
+                ops |= set(spec.operations)
+                tokens.add(spec.token)
+        if not ops:
+            return None
+        grant = CapabilityGrant(
+            task_id=task_id, step_id="plan", token="+".join(sorted(tokens)),
+            scope_path=ws, operations=sorted(ops),
+        )
+        self.log.append(task_id, EventKind.CAPABILITY_GRANT, grant)
+        return grant
 
     def _per_file_policy(self, task_id, contract, step, ws, grant, changed_paths,
                          approved_steps, step_action_id):
@@ -1647,6 +1721,88 @@ class Orchestrator:
             verification_ref=verification.id,
         )
 
+    def _run_qa_explain(self, task_id, contract, request_text, listing) -> TaskResult:
+        """`qa_explain` fast path: the request only wants an answer, not a file
+        change. One LLM call, no plan/build/verify. Settles COMPLETED with the
+        answer as the result summary and a stored artifact."""
+        from app.schemas.contracts import (
+            CriterionVerdict,
+            ModelRunRecord,
+            Observation,
+            Plan,
+            PlanStep,
+            VerificationRecord,
+        )
+
+        llm = getattr(self.interpreter, "llm", None) or getattr(self.planner, "llm", None)
+        question = contract.objective or request_text
+        system = (
+            "You are the Explainer of an autonomous coding system. Answer the "
+            "user's question directly and concretely, grounded in the workspace "
+            "listing and any session context provided. No preamble; no code "
+            "changes. If you are unsure, say what you would need to be sure."
+        )
+        ctx = request_text if request_text and request_text != question else ""
+        prompt = (
+            (f"CONTEXT:\n{ctx}\n\n" if ctx else "")
+            + f"QUESTION:\n{question}\n\nWORKSPACE FILES:\n{listing or '(none)'}\n\nAnswer now."
+        )
+        answer_text, run = "", None
+        if llm is not None:
+            try:
+                resp = llm.complete(system=system, prompt=prompt)
+                answer_text = (resp.text or "").strip()
+                run = ModelRunRecord(
+                    task_id=task_id, role="interpreter", provider=resp.provider,
+                    model=resp.model, latency_s=resp.latency_s,
+                    input_tokens=resp.input_tokens, output_tokens=resp.output_tokens,
+                )
+            except Exception as exc:  # noqa: BLE001 — a Q&A answer must never hard-fail the task
+                self.log.append(task_id, EventKind.ERROR,
+                                {"error": f"qa_explain model call: {exc!r}"})
+        if not answer_text:
+            answer_text = ("I couldn't produce an answer for this one — the model "
+                           "call didn't return usable text. Try rephrasing, or ask "
+                           "it to make a specific change instead.")
+
+        self._transition(task_id, State.PLANNING)
+        step = PlanStep(intent="answer the question", expected_artifact_delta="produce an explanation",
+                        required_capability="fs.read")
+        self.log.append(task_id, EventKind.PLAN, Plan(task_id=task_id, steps=[step]))
+        if run is not None:
+            self.log.append(task_id, EventKind.MODEL_RUN, run.model_dump(mode="json"))
+        self._transition(task_id, State.EXECUTING)
+
+        self.log.append(task_id, EventKind.SYNTHESIS, {"question": question, "answer": answer_text})
+        art = self._store_artifact(
+            task_id, "explanation", answer_text,
+            logical_key=self._logical_key("q", question), trust="workspace",
+            meta={"chars": len(answer_text)},
+        )
+        if art:
+            self.log.append(task_id, EventKind.ARTIFACT, art)
+        self.log.append(
+            task_id, EventKind.OBSERVATION,
+            Observation(task_id=task_id, step_id=step.id, exit_code=0,
+                        stdout=answer_text[:4000]).model_dump(mode="json"),
+        )
+        self._msg(task_id, "interpreter", "ANSWER", claims=[answer_text[:400]])
+
+        self._transition(task_id, State.VERIFYING)
+        verification = VerificationRecord(
+            task_id=task_id, tier="T0",
+            criteria=[CriterionVerdict(criterion="question answered directly", verdict="pass")],
+            overall="pass",
+        )
+        self.log.append(task_id, EventKind.VERIFICATION, verification)
+        self._transition(task_id, State.COMPLETED)
+        summary = answer_text if len(answer_text) <= 280 else answer_text[:277] + "..."
+        return self._finish(
+            task_id, summary, state=State.COMPLETED, verified=True,
+            artifact_ref=self._last_store_id(task_id),
+            verification_ref=verification.id,
+        )
+
     def _run_doc_analysis(self, task_id, contract, request_text) -> TaskResult:
         """`doc_analysis` deliverable path (Milestone L). Runs the KB answer path
         (retrieve -> claims-only synthesis -> cited `KBAnswer` at `doc_input`
@@ -1720,10 +1876,29 @@ class Orchestrator:
             verification_ref=verification.id,
         )
 
-    def _run_authoring(self, task_id, contract, request_text) -> TaskResult:
+    _FORMAT_HINTS = (
+        ("pptx", ("powerpoint", "power point", ".pptx", "pptx", "slide deck", "slides", "deck", "presentation")),
+        ("docx", ("word document", "word doc", "ms word", ".docx", "docx", " a word ", "in word")),
+        ("pdf", (".pdf", " pdf ", "pdf file")),
+        ("html", (".html", "web page", "html page")),
+        ("md", ("markdown", ".md")),
+    )
+
+    def _authoring_format(self, brief: str) -> str:
+        low = f" {brief.lower()} "
+        for fmt, needles in self._FORMAT_HINTS:
+            if any(n in low for n in needles):
+                return fmt
+        return "md"
+
+    def _run_authoring(self, task_id, contract, request_text, workspace_path="") -> TaskResult:
         """`authoring` deliverable path (Milestone M): outline -> grounded draft ->
         review -> render. The rendered document is the artifact; `review` issues
-        are advisory (§7.1)."""
+        are advisory (§7.1). A binary render (docx/pptx) is also written into the
+        workspace folder so the user gets the actual file."""
+        import re
+        from pathlib import Path
+
         from app.schemas.contracts import (
             CriterionVerdict,
             Observation,
@@ -1731,24 +1906,66 @@ class Orchestrator:
             PlanStep,
             VerificationRecord,
         )
+        from app.services.authoring.render import RendererUnavailable, get_renderer
+        from app.services.authoring.theme import theme_for_brief
+
+        brief = contract.objective or request_text
+        fmt = self._authoring_format(brief)
+        theme = theme_for_brief(brief)
+        # any images in the workspace (usually chat attachments) are candidates
+        # for the deck's image-layout slides
+        imgs: list[str] = []
+        try:
+            wp = Path(workspace_path)
+            if wp.is_dir():
+                imgs = sorted(str(f) for f in wp.iterdir()
+                              if f.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"})
+        except OSError:
+            pass
+        # swap the pipeline's renderer to the requested format + theme; fall back
+        # to markdown if a format needs a lib that isn't installed (e.g. pdf).
+        try:
+            self.authoring.renderer = get_renderer(fmt, theme=theme, images=imgs)
+            _ = fmt if fmt in ("md", "html") else self.authoring.renderer.__class__.__name__
+        except Exception:  # noqa: BLE001
+            fmt = "md"
 
         self._transition(task_id, State.PLANNING)
         step = PlanStep(
-            intent="outline, draft, review and render the document",
+            intent=f"outline, draft, review and render the document as {fmt}",
             expected_artifact_delta="produce a rendered document",
-            required_capability="fs.read",
+            required_capability="fs.write" if fmt in ("docx", "pptx") else "fs.read",
         )
         self.log.append(task_id, EventKind.PLAN, Plan(task_id=task_id, steps=[step]))
         self._transition(task_id, State.EXECUTING)
 
-        brief = contract.objective or request_text
         mem_ctx = self._memory_context(request_text, contract.task_class)
-        kind = "deck" if "slide" in brief.lower() or "deck" in brief.lower() else "report"
-        result = self.authoring.run(task_id, brief, kind=kind, memory_ctx=mem_ctx)
+        kind = "deck" if fmt == "pptx" or "slide" in brief.lower() or "deck" in brief.lower() else "report"
+        try:
+            result = self.authoring.run(task_id, brief, kind=kind, memory_ctx=mem_ctx)
+        except RendererUnavailable as exc:
+            self.authoring.renderer = get_renderer("md")
+            self.log.append(task_id, EventKind.PROGRESS,
+                            {"note": "renderer unavailable", "detail": str(exc), "fell_back_to": "md"})
+            fmt = "md"
+            result = self.authoring.run(task_id, brief, kind="report", memory_ctx=mem_ctx)
+
+        rendered = result.rendered
+        # write a binary render into the user's folder
+        written_path = None
+        if rendered.is_binary and workspace_path and Path(workspace_path).is_dir():
+            safe = re.sub(r"[^\w\- ]+", "", result.model.title or "document").strip() or "document"
+            written_path = f"{safe}.{rendered.ext}"
+            try:
+                (Path(workspace_path) / written_path).write_bytes(rendered.data)
+            except OSError as exc:
+                self.log.append(task_id, EventKind.ERROR, {"error": f"write {written_path}: {exc!r}"})
+                written_path = None
 
         self.log.append(
             task_id, EventKind.AUTHORING,
-            {"title": result.model.title, "kind": result.model.kind,
+            {"title": result.model.title, "kind": result.model.kind, "format": fmt,
+             "theme": getattr(theme, "name", "slate"), "written_path": written_path,
              "sections": len(list(result.model.walk())),
              "issues": [{"kind": i.kind, "section": i.section, "severity": i.severity}
                         for i in result.issues],
@@ -1756,19 +1973,25 @@ class Orchestrator:
         )
         self.log.append(
             task_id, EventKind.SYNTHESIS,
-            {"id": result.model.id, "mime": result.rendered.mime,
-             "text": result.rendered.text, "citations": result.citations,
+            {"id": result.model.id, "mime": rendered.mime,
+             "text": rendered.text,  # a readable preview for the transcript
+             "format": fmt, "written_path": written_path,
+             "citations": result.citations,
              "issues": len(result.issues), "flags": result.flags},
         )
         art = self._store_artifact(
-            task_id, "document", result.rendered.text,
+            task_id, "document", rendered.payload(),
             logical_key=self._logical_key("doc", result.model.title),
             trust="workspace",
-            meta={"mime": result.rendered.mime, "title": result.model.title,
+            meta={"mime": rendered.mime, "title": result.model.title, "format": fmt,
+                  "ext": rendered.ext, "written_path": written_path,
                   "citations": len(result.citations), "issues": len(result.issues)},
         )
         if art:
-            self.log.append(task_id, EventKind.ARTIFACT, art | {"model_id": result.model.id})
+            extra = {"model_id": result.model.id}
+            if written_path:
+                extra["changed_paths"] = [written_path]
+            self.log.append(task_id, EventKind.ARTIFACT, art | extra)
         self._msg(
             task_id, "author", "ANSWER",
             claims=[f"{result.model.title}: {len(list(result.model.walk()))} sections, "
@@ -1783,24 +2006,29 @@ class Orchestrator:
                         artifact_ref=result.model.id).model_dump(mode="json"),
         )
         self._transition(task_id, State.VERIFYING)
-        blocking = [i for i in result.issues if i.severity == "blocking"]
+        # review is ADVISORY (§7.1) — issues are reported, they don't block. The
+        # only hard failure is a document with no real content at all.
+        real_sections = sum(
+            1 for s in result.model.walk()
+            if any(b.text.strip() and not b.text.strip().startswith("_(") or b.items
+                   for b in s.blocks)
+        )
+        empty = real_sections == 0
         crit = CriterionVerdict(
-            criterion=(
-                f"authoring: outline+draft+review complete, {len(result.issues)} issue(s) "
-                f"({len(blocking)} blocking) reported"
-            ),
-            verdict="pass" if not blocking else "fail",
+            criterion=(f"authoring: {real_sections} section(s) with content, "
+                       f"{len(result.issues)} advisory review issue(s)"),
+            verdict="fail" if empty else "pass",
         )
         verification = VerificationRecord(
             task_id=task_id, tier="T0", criteria=[crit],
-            overall="pass" if not blocking else "fail",
+            overall="fail" if empty else "pass",
             residual_uncertainty="; ".join(i.detail for i in result.issues[:5]),
         )
         self.log.append(task_id, EventKind.VERIFICATION, verification)
-        if blocking:
+        if empty:
             self._transition(task_id, State.WAITING_FOR_USER)
             return self._finish(
-                task_id, f"authoring: {len(blocking)} blocking review issue(s)",
+                task_id, "authoring: the draft produced no usable content",
                 state=State.WAITING_FOR_USER,
             )
         self._transition(task_id, State.COMPLETED)

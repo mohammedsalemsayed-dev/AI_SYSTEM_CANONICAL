@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.llm.base import LLM
 from app.llm.parse import parse_json_object
 from app.schemas.contracts import ModelRunRecord, Plan, PlanStep, TaskContract
+from app.services.capability.registry import normalize_token
 
 PLANNER_SYSTEM = """You are the Planner of an autonomous coding system.
 Given a Task Contract and a flat file listing, produce a minimal ordered plan.
@@ -52,10 +53,10 @@ class Planner:
                         raw.get("expected_artifact_delta", "edit files")
                     ).strip()
                     or "edit files",
-                    required_capability=str(
-                        raw.get("required_capability", "fs.write")
-                    ).strip()
-                    or "fs.write",
+                    required_capability=normalize_token(
+                        str(raw.get("required_capability", "fs.write")).strip()
+                        or "fs.write"
+                    ),
                 )
             )
         if not steps:

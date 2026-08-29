@@ -17,22 +17,11 @@ from app.ui.server import serve
 
 
 def _build_runner(db_path: str):
-    from app.events.log import open_event_log
-    from app.llm import get_llm
-    from app.orchestration.orchestrator import Orchestrator
-    from app.services.build.agent_sdk import AgentSDKBuilder
-    from app.services.interpret.interpreter import Interpreter
-    from app.services.plan.planner import Planner
-    from app.services.policy.engine import PolicyEngine
-    from app.services.verify.verifier_t0 import VerifierT0
+    # local-first Builder + cloud escalation + full roster, run on a background
+    # thread so POST /api/tasks returns immediately. See app/ui/runner.py.
+    from app.ui.runner import build_task_runner
 
-    log = open_event_log(db_path)
-    llm = get_llm("agent_sdk")
-    orch = Orchestrator(
-        log, Interpreter(llm), Planner(llm), AgentSDKBuilder(),
-        VerifierT0(), PolicyEngine(),
-    )
-    return orch.run
+    return build_task_runner(db_path)
 
 
 def main(argv: list[str]) -> int:

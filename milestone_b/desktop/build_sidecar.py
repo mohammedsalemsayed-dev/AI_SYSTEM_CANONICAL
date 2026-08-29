@@ -42,9 +42,23 @@ def target_triple() -> str:
     return "aarch64-unknown-linux-gnu" if "aarch64" in plat else "x86_64-unknown-linux-gnu"
 
 
+def _pyinstaller_cmd() -> list[str] | None:
+    """Prefer the console script; fall back to `python -m PyInstaller` (the pip
+    wheel does not always drop a `pyinstaller` shim on PATH)."""
+    exe = shutil.which("pyinstaller")
+    if exe:
+        return [exe]
+    try:
+        import PyInstaller  # noqa: F401
+    except ImportError:
+        return None
+    return [sys.executable, "-m", "PyInstaller"]
+
+
 def main() -> int:
-    if shutil.which("pyinstaller") is None:
-        print("error: pyinstaller not found. `pip install pyinstaller`", file=sys.stderr)
+    pyi = _pyinstaller_cmd()
+    if pyi is None:
+        print("error: PyInstaller not found. `pip install pyinstaller`", file=sys.stderr)
         return 2
     if not ENTRY.is_file():
         print(f"error: entry not found: {ENTRY}", file=sys.stderr)
@@ -53,7 +67,7 @@ def main() -> int:
     work = HERE / "_pyi"
     sep = ";" if sys.platform == "win32" else ":"
     cmd = [
-        "pyinstaller", "--noconfirm", "--clean", "--onefile",
+        *pyi, "--noconfirm", "--clean", "--onefile",
         "--name", "nexus-server",
         "--distpath", str(work / "dist"),
         "--workpath", str(work / "build"),
@@ -61,8 +75,21 @@ def main() -> int:
         "--add-data", f"{WEB}{sep}app/ui/web",
         "--collect-submodules", "app",
         "--hidden-import", "app.ui.server",
+        "--hidden-import", "app.ui.runner",
+        "--hidden-import", "app.llm.vision",
+        "--hidden-import", "app.services.verify.verifier_godot",
+        "--hidden-import", "app.services.authoring.pdf_writer",
+        "--hidden-import", "app.services.tools.adapters.mcp_tool",
         str(ENTRY),
     ]
+    # Optional integrations — bundle each if installed: the cloud-escalation
+    # path (claude_agent_sdk) and the authoring renderers (docx/pptx).
+    for opt in ("claude_agent_sdk", "anthropic", "docx", "pptx", "pypdf"):
+        try:
+            __import__(opt)
+        except ImportError:
+            continue
+        cmd[-1:-1] = ["--collect-all", opt]
     print(" ".join(cmd))
     subprocess.run(cmd, check=True, cwd=REPO)
 

@@ -3,10 +3,14 @@ capability issuance end to end (MILESTONE_C_PLAN.md section 7)."""
 
 from __future__ import annotations
 
+import json
+
 from app.events.log import EventKind, EventLog
 from app.events.projections import project_task
+from app.services.build.fake import ScriptedBuilder
+from app.services.interpret.interpreter import INTERPRETER_SYSTEM
 from app.services.policy.engine import PolicyEngine
-from tests.conftest import FIXED_CALC
+from tests.conftest import FIXED_CALC, WRONG_CALC
 from tests.integration.conftest import (
     build_orchestrator,
     interpreter_reply,
@@ -31,7 +35,10 @@ def test_capability_grant_is_logged_on_happy_path(sample_repo: str) -> None:
     log.close()
 
 
-def test_unknown_capability_token_fails_task(sample_repo: str) -> None:
+def test_unknown_capability_token_is_normalized_not_fatal(sample_repo: str) -> None:
+    """A small planner sometimes names a capability that doesn't exist
+    ('fs.root', 'git.diff'). That is repaired to the nearest real token — the
+    task proceeds instead of failing hard."""
     log = EventLog()
     orch = build_orchestrator(
         log,
@@ -40,11 +47,18 @@ def test_unknown_capability_token_fails_task(sample_repo: str) -> None:
     )
     result = orch.run("fix add", sample_repo)
 
-    assert result.state == "FAILED"
-    errors = [e.payload["error"] for e in log.read(result.task_id) if e.kind == EventKind.ERROR]
-    assert any("unknown capability" in msg for msg in errors)
-    kinds = [e.kind for e in log.read(result.task_id)]
-    assert EventKind.ARTIFACT not in kinds  # builder never ran
+    assert result.state == "COMPLETED"
+    events = log.read(result.task_id)
+    # no unknown-capability ERROR
+    assert not [e for e in events if e.kind == EventKind.ERROR
+                and "unknown capability" in str(e.payload.get("error", ""))]
+    # the plan step carries a real token, not the bogus one
+    plan = next(e for e in events if e.kind == EventKind.PLAN)
+    caps = {s["required_capability"] for s in plan.payload["steps"]}
+    assert "fs.root" not in caps
+    assert caps <= {"fs.read", "fs.write", "fs.delete", "shell.run",
+                    "net.fetch", "secret.use", "vcs.read", "vcs.write"}
+    assert EventKind.ARTIFACT in [e.kind for e in events]  # builder still ran
     log.close()
 
 
@@ -146,6 +160,77 @@ def test_per_file_policy_is_silent_for_ordinary_files(sample_repo: str) -> None:
     r = orch.run("fix add", sample_repo)
     assert r.state == "COMPLETED"
     per_file = [e for e in log.read(r.task_id) if e.kind == EventKind.POLICY_DECISION
+                and e.payload.get("scope") == "per-file"]
+    assert per_file and all(e.payload["decision"] == "ALLOW" for e in per_file)
+    log.close()
+
+
+def _multi_step_plan(*caps: str) -> str:
+    return json.dumps({
+        "steps": [
+            {"intent": f"step {i} ({c})",
+             "expected_artifact_delta": "edit calc.py",
+             "required_capability": c}
+            for i, c in enumerate(caps)
+        ]
+    })
+
+
+def test_per_file_policy_allows_writes_on_a_recovery_replan_read_step(sample_repo: str) -> None:
+    """Regression: the recovery / escalation re-drive must carry write authority
+    into the per-changed-file gate.
+
+    The Builder is not step-scoped — it performs the plan's edits on whichever
+    step it is handed first. When the escalation ladder re-plans after a STALL,
+    the new plan leads with an `fs.read` "inspect" step; the Builder's writes
+    land there. Before the fix, `_per_file_policy` checked them against the read
+    step's grant and raised
+    `BuildError("per-file policy DENY [operation-not-granted] ... 'file.write'
+    is not in the capability grant")`, failing the task on the second attempt
+    even though the first attempt allowed the same writes.
+    """
+    calls = {"n": 0}
+
+    def edit(ws: str) -> None:
+        from pathlib import Path
+
+        calls["n"] += 1
+        # first plan (3 scored steps) never fixes the bug -> STALLED -> re-plan;
+        # from the re-plan onward the Builder produces the correct file.
+        content = FIXED_CALC if calls["n"] > 3 else WRONG_CALC
+        Path(ws, "calc.py").write_text(content, encoding="utf-8", newline="\n")
+
+    def llm(system: str, prompt: str) -> str:
+        if system == INTERPRETER_SYSTEM:
+            return interpreter_reply()
+        llm.plans += 1  # type: ignore[attr-defined]
+        if llm.plans == 1:  # type: ignore[attr-defined]
+            return _multi_step_plan("fs.write", "fs.write", "fs.write", "fs.write")
+        return _multi_step_plan("fs.read", "fs.write")  # the re-plan: inspect first
+
+    llm.plans = 0  # type: ignore[attr-defined]
+
+    log = EventLog()
+    orch = build_orchestrator(log, llm_replies=[], builder_edits={})
+    orch.interpreter.llm._callable = llm  # scripted callable for both roles
+    orch.planner.llm._callable = llm
+    orch.builder = ScriptedBuilder(edit)
+    orch.per_file_policy = True
+
+    r = orch.run("fix add", sample_repo)
+
+    ev = log.read(r.task_id)
+    errors = [e.payload.get("error", "") for e in ev if e.kind == EventKind.ERROR]
+    assert not any("operation-not-granted" in m for m in errors), errors
+    assert r.state == "COMPLETED" and r.verified is True
+
+    # the ladder actually re-planned (>1 PLAN) ...
+    assert len([e for e in ev if e.kind == EventKind.PLAN]) >= 2
+    # ... a plan-scoped grant was minted for the per-file gate ...
+    assert any(e.kind == EventKind.CAPABILITY_GRANT and e.payload.get("step_id") == "plan"
+               for e in ev)
+    # ... and the write attributed to the read step was allowed, not denied.
+    per_file = [e for e in ev if e.kind == EventKind.POLICY_DECISION
                 and e.payload.get("scope") == "per-file"]
     assert per_file and all(e.payload["decision"] == "ALLOW" for e in per_file)
     log.close()

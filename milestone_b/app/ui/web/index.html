@@ -4,35 +4,86 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NEXUS — control plane</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <aside class="left">
-    <h1>NEXUS</h1>
-    <div class="hint">read-only view of the event log</div>
-    <div id="tasklist" class="tasklist"></div>
+  <aside class="col rail-left">
+    <div class="brand">NEXUS</div>
+    <div class="brand-sub">local-first coding agent</div>
+
+    <div class="newsess">
+      <input id="new-ws" placeholder="folder path — start a session" />
+      <button id="new-btn" title="start a session in this folder">＋</button>
+    </div>
+
+    <div class="lbl">Sessions</div>
+    <div id="sessionlist"></div>
   </aside>
 
   <main>
-    <header>
-      <div><b id="task-objective">no task selected</b><small id="task-class"></small></div>
-      <div class="strip" id="health-strip"></div>
-    </header>
-    <section class="timeline" id="timeline"></section>
-    <footer>
-      <input id="submit-request" placeholder="What should the system accomplish? (submit must be enabled server-side)" />
-      <input id="submit-workspace" placeholder="workspace path" />
-      <button id="submit-btn">SUBMIT</button>
-    </footer>
+    <div class="head">
+      <div>
+        <div class="obj" id="obj">No session selected</div>
+        <div class="obj-sub" id="obj-sub">pick a folder to begin</div>
+      </div>
+      <span class="pill" id="verdict">—</span>
+    </div>
+
+    <section class="stream" id="stream">
+      <div class="empty">Start a session with a folder path on the left, then send a message.</div>
+    </section>
+
+    <button id="jump" class="jump" hidden>↓ jump to latest</button>
+
+    <div class="nowline" id="nowline" hidden><span>◷</span><span class="sh" id="now-text"></span></div>
+
+    <div class="statusbar" id="statusbar" hidden></div>
+
+    <div class="composer" id="composer">
+      <div class="chips" id="chips" hidden></div>
+      <div class="composer-input">
+        <button id="attach-btn" class="attach" title="attach files (docs, images, code)">📎</button>
+        <input type="file" id="attach-input" multiple hidden />
+        <textarea id="msg" rows="1" placeholder="Send a message  ·  drop or 📎 to attach files"></textarea>
+      </div>
+      <div class="composer-row">
+        <label class="apply" title="write the verified diff back to the folder">
+          <input type="checkbox" id="s-apply" checked /> apply changes
+        </label>
+        <label class="esc" title="model used when a local diff fails verification">
+          escalate to
+          <select id="s-esc">
+            <option value="sonnet">Sonnet</option>
+            <option value="opus">Opus (stronger)</option>
+            <option value="default">SDK default</option>
+          </select>
+        </label>
+        <span class="runhint" id="runhint"></span>
+        <button id="send-btn">Send</button>
+      </div>
+    </div>
   </main>
 
-  <aside class="right">
-    <h3>AGENTS</h3>
-    <div id="agents"></div>
-    <h3>METRICS</h3>
-    <div id="metrics"></div>
-    <h3>ROUTING</h3>
-    <div id="routes"></div>
+  <aside class="col rail-right">
+    <div class="lbl">Plan</div>
+    <div class="plan" id="plan"><div class="kv">no run yet</div></div>
+
+    <div class="lbl">Hardware <span class="lbl-note">live · every 3s</span></div>
+    <div id="hardware" class="hardware"><div class="kv">…</div></div>
+
+    <div class="lbl">Model calls <span class="lbl-note">this task · in order</span></div>
+    <div id="calls" class="calls"></div>
+    <div class="calls-foot" id="calls-foot" hidden></div>
+
+    <div class="lbl">Counters</div>
+    <div id="counters"></div>
+
+    <div class="lbl">Routing</div>
+    <div id="routes"><div class="kv">no routing yet</div></div>
   </aside>
 
   <script src="/app.js"></script>

@@ -59,6 +59,8 @@ _HEADLINES = {
     EventKind.CANARY: "canary",
     EventKind.REGRESSION: "regression gate",
     EventKind.RESULT: "task settled",
+    EventKind.SYNTHESIS: "answer",
+    EventKind.AUTHORING: "document",
     EventKind.STATE: "state transition",
     EventKind.ERROR: "error",
 }
@@ -94,6 +96,90 @@ def task_list(log: EventLog) -> dict[str, Any]:
     return {"tasks": out, "count": len(out)}
 
 
+def _session_key(events: list) -> tuple[str | None, str]:
+    """(session_id, workspace) for a task. Falls back to a folder hash so tasks
+    created before the session concept still thread by working directory."""
+    import hashlib
+    import os
+
+    req = next((e.payload for e in events if e.kind == EventKind.REQUEST), {})
+    ws = req.get("workspace_path") or req.get("workspace") or ""
+    sid = req.get("session_id")
+    if sid:
+        return sid, ws
+    if ws:
+        return "s_" + hashlib.sha1(os.path.normcase(ws).encode()).hexdigest()[:12], ws
+    return None, ""
+
+
+def session_list(log: EventLog) -> dict[str, Any]:
+    groups: dict[str, dict[str, Any]] = {}
+    for tid in _all_task_ids(log):
+        events = log.read(tid)
+        if not events:
+            continue
+        sid, ws = _session_key(events)
+        if not sid:
+            continue
+        snap = project_task(events)
+        req = next((e.payload for e in events if e.kind == EventKind.REQUEST), {})
+        g = groups.setdefault(sid, {
+            "session_id": sid, "workspace": ws, "tasks": 0,
+            "started_ts": events[0].ts, "updated_ts": events[-1].ts,
+            "last_message": "", "last_state": "",
+        })
+        g["tasks"] += 1
+        g["started_ts"] = min(g["started_ts"], events[0].ts)
+        g["updated_ts"] = max(g["updated_ts"], events[-1].ts)
+        g["last_message"] = req.get("text", "") or g["last_message"]
+        g["last_state"] = snap.state.value
+    out = sorted(groups.values(), key=lambda x: x["updated_ts"], reverse=True)
+    return {"sessions": out, "count": len(out)}
+
+
+def session_timeline(log: EventLog, session_id: str) -> dict[str, Any] | None:
+    items: list[tuple[float, str, list, str]] = []
+    for tid in _all_task_ids(log):
+        events = log.read(tid)
+        if not events:
+            continue
+        sid, ws = _session_key(events)
+        if sid != session_id:
+            continue
+        items.append((events[0].ts, tid, events, ws))
+    if not items:
+        return None
+    items.sort()
+    workspace = items[-1][3]
+
+    rows: list[dict[str, Any]] = []
+    for _ts, tid, events, _ws in items:
+        req = next((e.payload for e in events if e.kind == EventKind.REQUEST), {})
+        atts = [a for a in (req.get("attachments") or []) if a]
+        rows.append({"kind": "MESSAGE", "ts": events[0].ts, "task_id": tid,
+                     "headline": req.get("text", ""), "detail": "",
+                     "data": {"attachments": atts} if atts else None})
+        tl = task_timeline(log, tid)
+        for row in (tl["events"] if tl else []):
+            rows.append({**row, "task_id": tid})
+
+    latest = task_timeline(log, items[-1][1]) or {}
+    return {
+        "session_id": session_id,
+        "workspace": workspace,
+        "state": latest.get("state"),
+        "tasks": len(items),
+        "objective": latest.get("objective"),
+        "task_class": latest.get("task_class"),
+        "verification": latest.get("verification"),
+        "spend": latest.get("spend"),
+        "plan": latest.get("plan", []),
+        "runs": latest.get("runs", []),
+        "counters": latest.get("counters", {}),
+        "events": rows[-(_PAGE * 2):],
+    }
+
+
 def task_timeline(log: EventLog, task_id: str) -> dict[str, Any] | None:
     events = log.read(task_id)
     if not events:
@@ -108,15 +194,17 @@ def task_timeline(log: EventLog, task_id: str) -> dict[str, Any] | None:
             to = e.payload.get("state") or e.payload.get("to")
             transitions.append({"ts": e.ts, "from": prev_state, "to": to})
             prev_state = to
-        rows.append(
-            {
-                "seq": e.seq,
-                "ts": e.ts,
-                "kind": e.kind,
-                "headline": _HEADLINES.get(e.kind, e.kind.lower().replace("_", " ")),
-                "detail": _detail(e.kind, e.payload),
-            }
-        )
+        row = {
+            "seq": e.seq,
+            "ts": e.ts,
+            "kind": e.kind,
+            "headline": _HEADLINES.get(e.kind, e.kind.lower().replace("_", " ")),
+            "detail": _detail(e.kind, e.payload),
+        }
+        data = _row_data(e.kind, e.payload)
+        if data:
+            row["data"] = data
+        rows.append(row)
 
     return {
         "task_id": task_id,
@@ -129,6 +217,9 @@ def task_timeline(log: EventLog, task_id: str) -> dict[str, Any] | None:
             {"tier": snap.verification.tier, "overall": snap.verification.overall}
             if snap.verification else None
         ),
+        "plan": _plan(events, snap.state.value),
+        "runs": _runs(events),
+        "counters": _counters(events),
         "events": rows[-_PAGE:],
     }
 
@@ -252,7 +343,140 @@ def _detail(kind: str, payload: dict[str, Any]) -> str:
         return payload.get("objective", "")
     if kind == EventKind.ERROR:
         return str(payload.get("error", ""))[:200]
+    if kind == EventKind.MODEL_RUN:
+        who = payload.get("role", "?")
+        prov = payload.get("provider") or payload.get("model") or ""
+        lat = payload.get("latency_s")
+        tail = f" · {lat:.1f}s" if isinstance(lat, (int, float)) and lat else ""
+        return f"{who} on {prov}{tail}" if prov else who
+    if kind == EventKind.ARTIFACT:
+        paths = payload.get("changed_paths") or []
+        return ", ".join(paths[:4]) + (" …" if len(paths) > 4 else "")
+    if kind == EventKind.CRITIC:
+        v = payload.get("verdict", "")
+        findings = payload.get("findings") or []
+        return f"{v}" + (f" — {len(findings)} finding(s)" if findings else "")
+    if kind == EventKind.BRAINSTORM:
+        n = len(payload.get("approaches") or [])
+        return f"{n} candidate approach(es)"
+    if kind == EventKind.TOOL_LOOP:
+        return f"{payload.get('tool_calls', '?')} tool call(s), {payload.get('turns', '?')} turn(s)"
+    if kind == EventKind.SYNTHESIS:
+        if payload.get("written_path"):
+            return f"wrote {payload['written_path']} to your folder"
+        ans = payload.get("answer") or payload.get("summary") or payload.get("text") or ""
+        return ans[:200] + ("…" if len(ans) > 200 else "")
+    if kind == EventKind.AUTHORING:
+        wp = payload.get("written_path")
+        return (f"{payload.get('title', 'document')} — {payload.get('format', '?')}"
+                + (f" → {wp}" if wp else "") + f" · {payload.get('sections', 0)} sections")
     return ""
+
+
+# kind-specific structured payload the stream renderer can expand inline
+def _row_data(kind: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    if kind == EventKind.ARTIFACT:
+        diff = (payload.get("diff") or "")
+        # keep the wire small — the stream only shows the first hunk
+        lines = diff.splitlines()
+        return {
+            "changed_paths": payload.get("changed_paths") or [],
+            "diff": "\n".join(lines[:40]) + ("\n…" if len(lines) > 40 else ""),
+        }
+    if kind == EventKind.BRAINSTORM:
+        return {"approaches": [str(a)[:160] for a in (payload.get("approaches") or [])][:4]}
+    if kind == EventKind.SYNTHESIS:
+        body = payload.get("answer") or payload.get("summary") or payload.get("text") or ""
+        d = {"answer": body[:6000]}
+        if payload.get("written_path"):
+            d["written_path"] = payload["written_path"]
+            d["format"] = payload.get("format")
+        return d
+    if kind == EventKind.ESCALATION:
+        if "from_builder" in payload or "to_builder" in payload:
+            return {"from": payload.get("from_builder"), "to": payload.get("to_builder"),
+                    "reason": payload.get("reason", "")}
+        return {"rung": payload.get("rung"), "reason": payload.get("reason", "")}
+    if kind == EventKind.VERIFICATION:
+        return {"tier": payload.get("tier", "T0"), "overall": payload.get("overall", "?")}
+    if kind == EventKind.MODEL_RUN:
+        return {"role": payload.get("role"), "provider": payload.get("provider") or payload.get("model"),
+                "latency_s": payload.get("latency_s", 0.0)}
+    return None
+
+
+# --- the plan tracker: a fixed ladder folded from the event stream ------- #
+def _plan(events: list, state: str) -> list[dict[str, Any]]:
+    kinds = {e.kind for e in events}
+    verifs = [e.payload.get("overall") for e in events if e.kind == EventKind.VERIFICATION]
+    escalated = EventKind.ESCALATION in kinds
+    steps: list[dict[str, Any]] = []
+
+    def add(key: str, label: str, done: bool, now: bool, meta: str = "") -> None:
+        steps.append({"key": key, "label": label,
+                      "state": "done" if done else ("now" if now else "wait"),
+                      "meta": meta})
+
+    add("interpret", "Interpret the objective",
+        EventKind.CONTRACT in kinds, state == "INTERPRETING")
+    if EventKind.BRAINSTORM in kinds:
+        n = next((len(e.payload.get("approaches") or [])
+                  for e in events if e.kind == EventKind.BRAINSTORM), 0)
+        add("brainstorm", "Brainstorm approaches", True, False, f"{n} offered")
+    add("plan", "Plan the change", EventKind.PLAN in kinds, state == "PLANNING")
+    add("edit", "Apply the edit", EventKind.ARTIFACT in kinds,
+        state in ("EXECUTING", "RECOVERING"),
+        "local → cloud" if escalated else "")
+    v_meta = ""
+    if verifs:
+        v_meta = "fail → pass" if ("fail" in verifs and "pass" in verifs) else (verifs[-1] or "")
+    add("verify", "Verify the change",
+        bool(verifs) and verifs[-1] == "pass", state == "VERIFYING", v_meta)
+    if EventKind.CRITIC in kinds:
+        cv = next((e.payload.get("verdict", "")
+                   for e in reversed(events) if e.kind == EventKind.CRITIC), "")
+        add("critic", "Critic review", True, False, str(cv))
+    terminal = state in ("COMPLETED", "FAILED")
+    add("settle", "Settle the task", EventKind.RESULT in kinds,
+        state in ("STALLED", "RECOVERING", "WAITING_FOR_USER"),
+        state.lower() if terminal else "")
+    return steps
+
+
+def _runs(events: list) -> list[dict[str, Any]]:
+    out = []
+    for e in events:
+        if e.kind != EventKind.MODEL_RUN:
+            continue
+        p = e.payload
+        out.append({
+            "ts": e.ts,
+            "role": p.get("role", "?"),
+            "provider": p.get("provider") or p.get("model") or "",
+            "latency_s": round(float(p.get("latency_s", 0.0) or 0.0), 2),
+            "in": int(p.get("input_tokens", 0) or 0),
+            "out": int(p.get("output_tokens", 0) or 0),
+        })
+    return out
+
+
+def _counters(events: list) -> dict[str, Any]:
+    v_pass = v_fail = escs = runs = t_in = t_out = 0
+    for e in events:
+        if e.kind == EventKind.VERIFICATION:
+            if e.payload.get("overall") == "pass":
+                v_pass += 1
+            else:
+                v_fail += 1
+        elif e.kind == EventKind.ESCALATION:
+            escs += 1
+        elif e.kind == EventKind.MODEL_RUN:
+            runs += 1
+            t_in += int(e.payload.get("input_tokens", 0) or 0)
+            t_out += int(e.payload.get("output_tokens", 0) or 0)
+    return {"events": len(events), "model_runs": runs, "escalations": escs,
+            "verify_pass": v_pass, "verify_fail": v_fail,
+            "in_tokens": t_in, "out_tokens": t_out}
 
 
 def _spend(events: list) -> dict[str, Any]:

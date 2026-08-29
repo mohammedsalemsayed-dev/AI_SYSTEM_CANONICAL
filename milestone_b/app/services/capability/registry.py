@@ -82,6 +82,35 @@ def spec_for(token: str) -> CapabilitySpec | None:
     return _REGISTRY.get(token)
 
 
+# Small models sometimes name a capability that does not exist ("git.diff",
+# "read_file", "python.run"). Rather than fail the whole task, map the token to
+# the nearest real one by keyword. A genuinely unknown token still resolves to
+# the most conservative useful default (fs.read) — never straight to a
+# side-effecting capability.
+_NORMALIZE_HINTS: tuple[tuple[frozenset[str], str], ...] = (
+    (frozenset({"diff", "status", "log", "blame", "git", "vcs", "history"}), "vcs.read"),
+    (frozenset({"branch", "commit", "checkout"}), "vcs.write"),
+    (frozenset({"delete", "remove", "rm", "unlink"}), "fs.delete"),
+    (frozenset({"write", "edit", "create", "modify", "patch", "apply", "save"}), "fs.write"),
+    (frozenset({"shell", "run", "exec", "cmd", "command", "bash", "pytest", "test", "python"}), "shell.run"),
+    (frozenset({"net", "http", "https", "fetch", "url", "web", "download", "request"}), "net.fetch"),
+    (frozenset({"secret", "token", "credential", "key"}), "secret.use"),
+    (frozenset({"read", "list", "inspect", "view", "cat", "open", "scan", "ls"}), "fs.read"),
+)
+
+
+def normalize_token(token: str) -> str:
+    """Return `token` if known, else the closest known token by keyword."""
+    if token in _REGISTRY:
+        return token
+    low = (token or "").lower().replace("-", ".").replace("_", ".")
+    parts = set(low.split(".")) | {low}
+    for keywords, target in _NORMALIZE_HINTS:
+        if parts & keywords:
+            return target
+    return "fs.read"
+
+
 def primary_operation(token: str) -> str:
     """The representative operation a coarse step proposes under `token`."""
     return _PRIMARY_OP.get(token, token)

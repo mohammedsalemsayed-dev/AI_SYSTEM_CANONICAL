@@ -34,11 +34,23 @@ def _need(tool: str, hint: str) -> str | None:
     return None
 
 
+def _need_pyinstaller() -> str | None:
+    """Accept either the `pyinstaller` shim or the importable module — the pip
+    wheel does not always install a console script."""
+    if _resolve("pyinstaller"):
+        return None
+    try:
+        import PyInstaller  # noqa: F401
+    except ImportError:
+        return "missing prerequisite: PyInstaller not installed — pip install pyinstaller"
+    return None
+
+
 def main() -> int:
     problems = [
         p for p in (
             _need("python", "install Python 3.12+"),
-            _need("pyinstaller", "pip install pyinstaller"),
+            _need_pyinstaller(),
             _need("npm", "install Node.js 18+ (https://nodejs.org)"),
             _need("cargo", "install Rust (https://rustup.rs) + platform build tools"),
         ) if p
