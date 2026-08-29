@@ -2011,7 +2011,10 @@ class Orchestrator:
         # text (md/html) so every deliverable lands as a real file, not just a
         # transcript preview
         written_path = None
-        if workspace_path and Path(workspace_path).is_dir():
+        _wp = Path(workspace_path).resolve() if workspace_path else None
+        # a real user folder, not "." / the process cwd (tests drive with ".")
+        _real_ws = _wp is not None and _wp.is_dir() and _wp != Path.cwd().resolve()
+        if _real_ws:
             safe = re.sub(r"[^\w\- ]+", "", result.model.title or "document").strip() or "document"
             written_path = f"{safe}.{rendered.ext}"
             try:

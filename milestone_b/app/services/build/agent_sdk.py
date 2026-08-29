@@ -9,6 +9,7 @@ installed SDK version before relying on it — the SDK API may have drifted.
 from __future__ import annotations
 
 import asyncio
+import os
 
 from app.schemas.contracts import PlanStep, TaskContract
 from app.services.build.base import BuildOutput
@@ -49,10 +50,24 @@ class AgentSDKBuilder:
     def execute(
         self, *, task_id: str, step: PlanStep, contract: TaskContract, workspace: str
     ) -> BuildOutput:
+        # the SDK's `cwd=` option does NOT set the agent's actual working
+        # directory (observed on claude_agent_sdk 0.2.145: the agent writes to a
+        # stale baked-in path and nothing lands in `workspace`). Chdir the
+        # process for the duration of the call — restore it no matter what.
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(workspace)
+        except OSError as exc:
+            return BuildOutput(exit_code=1, error=f"agent sdk: bad workspace {workspace}: {exc!r}")
         try:
             transcript = asyncio.run(self._run(step, contract, workspace))
         except Exception as exc:
             return BuildOutput(exit_code=1, error=f"agent sdk error: {exc!r}")
+        finally:
+            try:
+                os.chdir(prev_cwd)
+            except OSError:
+                pass
 
         diff, names = diff_workspace(workspace)
         if not diff.strip():
@@ -72,13 +87,22 @@ class AgentSDKBuilder:
     ) -> str:
         from claude_agent_sdk import ClaudeAgentOptions, query  # lazy
 
-        options = ClaudeAgentOptions(
+        opt_kw = dict(
             cwd=workspace,
-            permission_mode="acceptEdits",
+            add_dirs=[workspace],                      # grant write access to the copy
+            permission_mode="bypassPermissions",       # headless: no interactive approval
             allowed_tools=["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
             max_turns=self.max_turns,
-            **({"model": self.model} if self.model else {}),
         )
+        if self.model:
+            opt_kw["model"] = self.model
+        # load the user's real config (auth, model, MCP) when the SDK supports it
+        try:
+            options = ClaudeAgentOptions(
+                setting_sources=["user", "project", "local"], **opt_kw
+            )
+        except TypeError:
+            options = ClaudeAgentOptions(**opt_kw)  # older SDK without setting_sources
         target = extract_pytest_target(contract.required_evidence) or "(not specified)"
         constraints = (
             "\nCONSTRAINTS (address every one):\n"
@@ -95,6 +119,12 @@ class AgentSDKBuilder:
         chunks: list[str] = []
         async for message in query(prompt=prompt, options=options):
             text = getattr(message, "text", None) or getattr(message, "result", None)
+            if not text:
+                # AssistantMessage carries a list of content blocks, not `.text`
+                for blk in getattr(message, "content", None) or []:
+                    bt = getattr(blk, "text", None)
+                    if bt:
+                        chunks.append(str(bt))
             if text:
                 chunks.append(str(text))
         return "\n".join(chunks)
