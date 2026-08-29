@@ -86,6 +86,39 @@ def test_two_step_task_completes_with_healthy_progress(two_file_repo: str) -> No
     assert progress[-1]["hard_progress"] is True  # the second edit makes the test pass
 
 
+def test_one_shot_solve_on_a_multi_step_plan_completes_not_loops(two_file_repo: str) -> None:
+    """A builder that solves the whole task on step 1 (as the cloud builder does
+    after an escalation) used to re-emit the same diff on steps 2..N -> the loop
+    detector flagged 'diff_thrash' -> the recovery ladder ran to ask_user and the
+    task ended WAITING_FOR_USER without ever reaching the real T0 verify. Now the
+    green acceptance test short-circuits the remaining steps."""
+    def edits(ws: str) -> None:
+        # step 1 already makes a()+b() == 22; steps 2 and 3 change nothing
+        (Path(ws) / "mod_a.py").write_text("def a():\n    return 2\n", newline="\n")
+        (Path(ws) / "mod_b.py").write_text("def b():\n    return 20\n", newline="\n")
+
+    log = EventLog()
+    orch = build_orchestrator(
+        log,
+        llm_replies=[
+            interpreter_reply(
+                objective="make a()+b() == 22",
+                required_evidence=["T0: pytest test_both.py::test_sum passes"],
+            ),
+            _plan("implement the fix", "write/adjust tests", "run the tests"),
+        ],
+        builder_edits=edits,
+    )
+    result = orch.run("fix a and b so they sum to 22", two_file_repo)
+
+    assert result.state == "COMPLETED"
+    kinds = [e.kind for e in log.read(result.task_id)]
+    assert EventKind.CLARIFICATION not in kinds          # no ask_user
+    assert EventKind.VERIFICATION in kinds               # the real T0 verify ran
+    prog = [e.payload for e in log.read(result.task_id) if e.kind == EventKind.PROGRESS]
+    assert any("remaining plan step" in (p.get("detail") or "") for p in prog)
+
+
 def test_looping_builder_is_caught_and_pauses_for_user(two_file_repo: str) -> None:
     # builder makes the same wrong edit every step -> test keeps failing the same way
     def bad_edit(ws: str) -> None:

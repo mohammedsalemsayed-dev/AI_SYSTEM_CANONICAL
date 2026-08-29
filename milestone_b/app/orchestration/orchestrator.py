@@ -725,6 +725,23 @@ class Orchestrator:
                     | {"loop_flags": lr.flags, "effective_class": effective},
                 )
 
+                # the plan is a guide; the acceptance test is authoritative. Once
+                # the target is green, stop running the remaining plan steps —
+                # otherwise a one-shot cloud builder that already solved the task
+                # re-emits the same diff on steps 2..N, which the loop detector
+                # reads as "diff_thrash" and walks the whole recovery ladder to
+                # ask_user (never reaching the real T0 verify).
+                if m.acceptance_met and combined_diff.strip() and i + 1 < len(steps):
+                    self.log.append(
+                        task_id, EventKind.PROGRESS,
+                        {"step_index": executed, "classification": "HEALTHY_PROGRESS",
+                         "effective_class": "HEALTHY_PROGRESS", "hard_progress": True,
+                         "loop_flags": [], "no_progress_run": 0,
+                         "detail": f"acceptance test green — {len(steps) - i - 1} "
+                                   "remaining plan step(s) skipped"},
+                    )
+                    return combined_diff
+
                 if budget.over_hard():
                     raise BudgetExhausted(budget.summary())
                 if budget.over_soft() and not soft_warned:
