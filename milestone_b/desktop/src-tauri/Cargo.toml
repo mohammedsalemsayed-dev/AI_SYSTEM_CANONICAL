@@ -2,6 +2,9 @@
 name = "nexus-desktop"
 version = "0.1.0"
 description = "NEXUS native shell"
+authors = ["Mohammed Salem Sayed <mohammed.salem.sayed@gmail.com>"]
+license-file = "../../../LICENSE"
+publish = false
 edition = "2021"
 rust-version = "1.77.2"
 

@@ -1,0 +1,24 @@
+Copyright (c) 2026 Mohammed Salem Sayed. All rights reserved.
+
+This software and its associated source code, documentation, and other files
+(collectively, the "Software") are the proprietary and confidential work of
+Mohammed Salem Sayed (the "Author").
+
+No license or right is granted, express or implied, to any person or entity to
+use, copy, reproduce, modify, adapt, merge, publish, distribute, sublicense,
+sell, or create derivative works from the Software, in whole or in part, by any
+means or in any form, without the prior written permission of the Author.
+
+Unauthorized copying, distribution, disclosure, or use of the Software, via any
+medium, is strictly prohibited.
+
+Third-party dependencies fetched at build or run time (Python, Rust, and npm
+packages named in the manifests) are not part of the Software and remain subject
+to their own respective licenses.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE
+LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

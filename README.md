@@ -236,3 +236,8 @@ Redis/queue; a secrets vault; macOS/Linux bundles; T2-verifier false-positive tu
   objective, or widen a capability (§12).
 - "Foundation" / "seam" ≠ "complete" — deferred subsystems are present as named interfaces,
   never silently dropped.
+
+---
+
+© 2026 **Mohammed Salem Sayed**. All rights reserved. Proprietary — see [`LICENSE`](LICENSE).
+No use, copying, modification, or distribution without prior written permission.

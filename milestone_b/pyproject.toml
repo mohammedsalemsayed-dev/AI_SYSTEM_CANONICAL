@@ -6,6 +6,8 @@ build-backend = "hatchling.build"
 name = "milestone-b-slice"
 version = "0.1.0"
 description = "Milestone B vertical slice — request -> contract -> plan -> edit -> test -> result"
+authors = [{ name = "Mohammed Salem Sayed", email = "mohammed.salem.sayed@gmail.com" }]
+license = { text = "Proprietary — All rights reserved. See ../LICENSE." }
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.8",
