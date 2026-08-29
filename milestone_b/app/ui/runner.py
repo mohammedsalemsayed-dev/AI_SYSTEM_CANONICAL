@@ -126,6 +126,8 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
 
         is_godot = Path(workspace, "project.godot").is_file()
         is_unreal = any(Path(workspace).glob("*.uproject"))
+        is_android = (Path(workspace, "settings.gradle").is_file()
+                      or Path(workspace, "settings.gradle.kts").is_file())
         preamble = _session_context(db_path, session_id, workspace)
         att_note, att_kb = "", None
         if attachments:
@@ -142,6 +144,10 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
         elif is_godot:
             engine_note = ("[This is a Godot project — write GDScript (.gd) files, use "
                            "`extends`/`func`/`var`; verification runs `godot --headless`.]")
+        elif is_android:
+            engine_note = ("[This is an Android/Gradle project — keep state/logic in a "
+                           "ViewModel, strings in res/; verification runs `./gradlew` "
+                           "unit tests on a workspace copy.]")
         full_request = "\n".join(x for x in (preamble, engine_note, att_note, request) if x)
 
         local_llm = get_llm(_LOCAL)
@@ -155,6 +161,10 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
             from app.services.verify.verifier_godot import GodotVerifier
 
             verifier = GodotVerifier()
+        elif is_android:
+            from app.services.verify.verifier_android import AndroidVerifier
+
+            verifier = AndroidVerifier()
         orch = Orchestrator(
             log,
             Interpreter(local_llm),

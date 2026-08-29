@@ -47,9 +47,11 @@ def test_kind_and_prompt_note(tmp_path: Path) -> None:
     assert kind_of("chart.png") == "image" and kind_of("report.md") == "document"
     note = prompt_note(saved)
     assert "report.md" in note and "chart.png" in note
-    # no vision model in the test env -> images marked "not readable locally"
+    # with no supplied description, images are marked "not readable locally"
     assert "not readable locally" in note
-    assert describe_images(saved) == {}  # inert without a pulled vision model
+    # a 30-byte junk "PNG" yields no usable description whether or not a vision
+    # model is installed (no model -> inert; model -> 400 sentinel, filtered out)
+    assert describe_images(saved) == {}
     # a supplied description is embedded verbatim
     note2 = prompt_note(saved, {"chart.png": "A bar chart: Q1 40, Q2 55, Q3 70."})
     assert "from a vision model" in note2 and "Q3 70" in note2

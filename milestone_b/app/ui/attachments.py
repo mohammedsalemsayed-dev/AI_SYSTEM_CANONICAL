@@ -130,8 +130,10 @@ def describe_images(saved: list[dict]) -> dict[str, str]:
             return {}
         out: dict[str, str] = {}
         for s in imgs:
-            desc = vlm.describe(s["path"])
-            if desc:
+            desc = (vlm.describe(s["path"]) or "").strip()
+            # skip empties and the "(image description unavailable: ...)" sentinel
+            # — a failed describe must not be fed into the prompt as if it were one
+            if desc and not desc.startswith("(image description unavailable"):
                 out[s["name"]] = desc
         return out
     except Exception:  # noqa: BLE001 — vision is best-effort

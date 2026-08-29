@@ -78,6 +78,8 @@ def main() -> int:
         "--hidden-import", "app.ui.runner",
         "--hidden-import", "app.llm.vision",
         "--hidden-import", "app.services.verify.verifier_godot",
+        "--hidden-import", "app.services.verify.verifier_unreal",
+        "--hidden-import", "app.services.verify.verifier_android",
         "--hidden-import", "app.services.authoring.pdf_writer",
         "--hidden-import", "app.services.tools.adapters.mcp_tool",
         str(ENTRY),
