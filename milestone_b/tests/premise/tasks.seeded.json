@@ -2,51 +2,51 @@
   {
     "id": "01-pagination-off-by-one",
     "request": "paginate() includes one extra item on the last page. Fix it. The failing test is test_paginate.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/01-pagination-off-by-one"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/01-pagination-off-by-one"
   },
   {
     "id": "02-boundary-operator",
     "request": "is_adult() should treat exactly 18 as an adult but currently doesn't. The failing test is test_age.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/02-boundary-operator"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/02-boundary-operator"
   },
   {
     "id": "03-missing-empty-guard",
     "request": "average() raises ZeroDivisionError on an empty list; it should return 0.0. The failing test is test_stats.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/03-missing-empty-guard"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/03-missing-empty-guard"
   },
   {
     "id": "04-int-vs-float-division",
     "request": "midpoint() should return the true (float) midpoint, not a floored int. The failing test is test_geom.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/04-int-vs-float-division"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/04-int-vs-float-division"
   },
   {
     "id": "05-mutable-default-arg",
     "request": "add_tag() leaks tags between calls because of a mutable default argument. The failing test is test_tags.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/05-mutable-default-arg"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/05-mutable-default-arg"
   },
   {
     "id": "06-wrong-dict-key",
     "request": "user_city() reads the wrong key and returns None for the city. The failing test is test_profile.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/06-wrong-dict-key"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/06-wrong-dict-key"
   },
   {
     "id": "07-inverted-boolean",
     "request": "can_publish() has its logic inverted \u2014 drafts can publish and finished posts can't. The failing test is test_publish.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/07-inverted-boolean"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/07-inverted-boolean"
   },
   {
     "id": "08-missing-normalization",
     "request": "lookup() misses entries when the query has surrounding whitespace or different case. The failing test is test_directory.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/08-missing-normalization"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/08-missing-normalization"
   },
   {
     "id": "09-accumulator-init",
     "request": "product() starts its accumulator at 0, so every result is 0. The failing test is test_arith.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/09-accumulator-init"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/09-accumulator-init"
   },
   {
     "id": "10-returns-first-not-all",
     "request": "find_even() returns only the first even number; it should return all of them. The failing test is test_filters.py.",
-    "workspace": "C:/Users/lol/Downloads/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/10-returns-first-not-all"
+    "workspace": "E:/AI_SYSTEM_CANONICAL_COMPLETE/AI_SYSTEM_CANONICAL_COMPLETE/milestone_b/premise_repos/10-returns-first-not-all"
   }
 ]
