@@ -42,12 +42,19 @@ def _mcp_handler(script: dict):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
             elif m == "tools/list":
+                # a "call_tool:X" key is a proxy dispatch target, not an advertised tool
+                advertised = sorted({k.split(":", 1)[0] for k in script})
                 send({"tools": [{"name": k, "description": k,
                                  "inputSchema": {"type": "object", "properties": {}}}
-                                for k in script]})
+                                for k in advertised]})
             elif m == "tools/call":
                 p = req.get("params", {})
-                val = script.get(p.get("name"), ("unknown tool", True))
+                name = p.get("name")
+                if name == "call_tool":  # proxy: dispatch by arguments.tool_name
+                    a = p.get("arguments", {})
+                    val = script.get(f"call_tool:{a.get('tool_name')}", ("unknown tool", True))
+                else:
+                    val = script.get(name, ("unknown tool", True))
                 text, is_err = val if isinstance(val, tuple) else (val, False)
                 send({"content": [{"type": "text", "text": text}], "isError": is_err})
             else:
@@ -137,3 +144,34 @@ def test_empty_diff_fails(mcp, ue_repo):
     ad = mcp({"run_automation_tests": "3 passed, 0 failed"})
     r = UnrealVerifier(ad).verify(task_id="t", contract=_C, diff="", original_workspace=ue_repo)
     assert r.overall == "fail" and "no change" in r.residual_uncertainty
+
+
+# --- proxy MCP (Epic's UnrealMCP: list_toolsets / describe_toolset / call_tool) --
+_PROXY_TOOLS = {
+    "list_toolsets": "- AutomationTestToolset.AutomationTestToolset: Automation test discovery and execution toolset.",
+    "describe_toolset": "{}",
+    "call_tool:DiscoverTests": '{"returnValue": "{\\"status\\": \\"ready\\"}"}',
+}
+_PC = TaskContract(
+    task_id="t", original_request="fix", objective="fix Jump()",
+    task_class="code_edit_local", success_criteria=["jumps"],
+    required_evidence=["T0: unreal automation StartsWith:System.Core.Math.FColor passes"],
+)
+
+
+def test_proxy_mcp_pass(mcp, ue_repo):
+    ad = mcp({**_PROXY_TOOLS,
+              "call_tool:RunTestsByFilter":
+                  '{"returnValue": "{\\"passed\\": 2, \\"failed\\": 0, \\"total\\": 2}"}'})
+    r = UnrealVerifier(ad).verify(task_id="t", contract=_PC, diff=_GOOD_DIFF, original_workspace=ue_repo)
+    assert r.overall == "pass"
+    assert "return 42" in Path(ue_repo, "Source/Jump.cpp").read_text()
+
+
+def test_proxy_mcp_fail_reverts(mcp, ue_repo):
+    ad = mcp({**_PROXY_TOOLS,
+              "call_tool:RunTestsByFilter":
+                  '{"returnValue": "{\\"passed\\": 1, \\"failed\\": 2, \\"total\\": 3}"}'})
+    r = UnrealVerifier(ad).verify(task_id="t", contract=_PC, diff=_GOOD_DIFF, original_workspace=ue_repo)
+    assert r.overall == "fail" and "2 failed" in r.residual_uncertainty
+    assert Path(ue_repo, "Source/Jump.cpp").read_text() == "int Jump() { return 1; }\n"

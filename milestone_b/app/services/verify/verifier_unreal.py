@@ -19,6 +19,7 @@ the check fails loudly with that instruction; it never silently passes.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -36,6 +37,30 @@ _HARD_FAIL = ("test failed", "compile failed", "compilation failed",
 _RUNNER_RE = re.compile(r"(run.*test|automation.*run|run.*automation|test.*runner)", re.I)
 _CONSOLE_RE = re.compile(r"(run.*console|console.*command|exec.*command|execute.*console|^exec$)", re.I)
 _COMPILE_RE = re.compile(r"(compile|hot.?reload|build.*project|rebuild)", re.I)
+
+# a proxy MCP (e.g. Epic's UnrealMCP) exposes only list_toolsets/describe_toolset/
+# call_tool; the real runners live in an "automation test" toolset reached via
+# call_tool(toolset_name=..., tool_name="RunTests"/"RunTestsByFilter").
+_PROXY_CALL_RE = re.compile(r"(^|\.)call_tool$", re.I)
+_PROXY_LIST_RE = re.compile(r"(^|\.)list_toolsets$", re.I)
+_AUTOMATION_TS_RE = re.compile(r"automation.*test", re.I)
+_FILTER_HINT_RE = re.compile(r"(startswith:|group:|[\^$]|\+)", re.I)
+
+
+def _unwrap(output: str) -> dict:
+    """MCP tool output is JSON; a proxy double-encodes the payload as a JSON
+    string under `returnValue`. Return the innermost dict (or {} on anything odd)."""
+    try:
+        obj = json.loads(output)
+    except (ValueError, TypeError):
+        return {}
+    rv = obj.get("returnValue", obj) if isinstance(obj, dict) else obj
+    if isinstance(rv, str):
+        try:
+            rv = json.loads(rv)
+        except ValueError:
+            return {}
+    return rv if isinstance(rv, dict) else {}
 
 
 def extract_unreal_target(required_evidence: list[str]) -> str | None:
@@ -87,6 +112,50 @@ class UnrealVerifier:
     def _call(self, mcp, op, args, ws):
         return mcp.invoke(op, args, DispatchContext(task_id="", workspace=ws))
 
+    # -- proxy MCP (call_tool -> automation-test toolset) -------------- #
+    def _proxy_setup(self, mcp) -> tuple[str, str] | None:
+        """-> (call_tool_op, automation_toolset_name) if this is a proxy MCP with
+        an automation-test toolset, else None."""
+        ops = [o.op for o in mcp.manifest().ops]
+        call_op = next((o for o in ops if _PROXY_CALL_RE.search(o)), None)
+        list_op = next((o for o in ops if _PROXY_LIST_RE.search(o)), None)
+        if not (call_op and list_op):
+            return None
+        r = self._call(mcp, list_op, {}, ".")
+        if not r.ok:
+            return None
+        ts = None
+        for line in str(r.output or "").splitlines():
+            # lines look like "- AutomationTestToolset.AutomationTestToolset: Automation test ..."
+            name = line.lstrip("- ").split(":", 1)[0].strip()
+            if name and _AUTOMATION_TS_RE.search(line):
+                ts = name
+                break
+        return (call_op, ts) if ts else None
+
+    def _proxy_run(self, mcp, call_op: str, toolset: str, target: str, ws: str):
+        """DiscoverTests then RunTests(ByFilter). -> (passed, failed, hard, text)."""
+        def ct(tool, args):
+            return self._call(mcp, call_op,
+                              {"toolset_name": toolset, "tool_name": tool, "arguments": args}, ws)
+        ct("DiscoverTests", {})
+        if _FILTER_HINT_RE.search(target):
+            tr = ct("RunTestsByFilter", {"filterExpression": target})
+        elif " " in target or target.count(".") >= 2:
+            tr = ct("RunTests", {"testNames": [target]})
+            if not _unwrap(str(tr.output or "")).get("total"):
+                tr = ct("RunTestsByFilter", {"filterExpression": f"StartsWith:{target}"})
+        else:
+            tr = ct("RunTestsByFilter", {"filterExpression": f"StartsWith:{target}"})
+        data = _unwrap(str(tr.output or ""))
+        passed = int(data.get("passed", 0) or 0)
+        failed = int(data.get("failed", 0) or 0)
+        text = json.dumps(data)[:800] if data else str(tr.output or "")[:800]
+        hard = (not tr.ok) or any(h in text.lower() for h in _HARD_FAIL)
+        if not data and tr.ok:
+            hard = True  # ran but returned nothing parseable
+        return passed, failed, hard, text
+
     # -- verify -------------------------------------------- #
     def verify(self, *, task_id: str, contract: TaskContract, diff: str,
                original_workspace: str, extra_targets: list[str] | None = None) -> VerificationRecord:
@@ -112,7 +181,8 @@ class UnrealVerifier:
 
         run_op = self._op(mcp, _RUNNER_RE)
         console_op = self._op(mcp, _CONSOLE_RE) if run_op is None else None
-        if run_op is None and console_op is None:
+        proxy = self._proxy_setup(mcp) if (run_op is None and console_op is None) else None
+        if run_op is None and console_op is None and proxy is None:
             return rec("fail", "the MCP server exposes no test-run or console-command tool; "
                                "cannot run automation tests")
 
@@ -128,9 +198,10 @@ class UnrealVerifier:
                     return rec("fail", f"diff did not apply to the project: {r.stderr[:200]}")
                 applied = True
 
-            # compile / hot-reload if the MCP offers it
-            comp_op = self._op(mcp, _COMPILE_RE)
-            comp_out = ""
+            # compile / hot-reload if the MCP offers a flat tool for it (a proxy
+            # MCP's editor toolset can too, but a blueprint/content change on a
+            # sample project has nothing to compile — skip rather than guess)
+            comp_op = self._op(mcp, _COMPILE_RE) if not proxy else None
             if comp_op:
                 cr = self._call(mcp, comp_op, {}, ws)
                 comp_out = str(cr.output or "")
@@ -138,17 +209,21 @@ class UnrealVerifier:
                     return rec("fail", f"compile/hot-reload failed: {comp_out[:300]}")
 
             # run the tests
-            if run_op:
-                tr = self._call(mcp, run_op, {"filter": tgt, "tests": tgt}, ws)
+            if proxy:
+                passed_n, failed_n, hard, out = self._proxy_run(mcp, proxy[0], proxy[1], tgt, ws)
+                ok = not hard and failed_n == 0 and passed_n > 0
             else:
-                tr = self._call(mcp, console_op, {"command": f"Automation RunTests {tgt}",
-                                                  "cmd": f"Automation RunTests {tgt}"}, ws)
-            out = str(tr.output or "")
-            low = out.lower()
-            passed_n = int(_PASS_RE.search(out).group(1)) if _PASS_RE.search(out) else 0
-            failed_n = int(_FAIL_RE.search(out).group(1)) if _FAIL_RE.search(out) else 0
-            hard = any(h in low for h in _HARD_FAIL)
-            ok = tr.ok and not hard and failed_n == 0 and (passed_n > 0 or "success" in low)
+                if run_op:
+                    tr = self._call(mcp, run_op, {"filter": tgt, "tests": tgt}, ws)
+                else:
+                    tr = self._call(mcp, console_op, {"command": f"Automation RunTests {tgt}",
+                                                      "cmd": f"Automation RunTests {tgt}"}, ws)
+                out = str(tr.output or "")
+                low = out.lower()
+                passed_n = int(_PASS_RE.search(out).group(1)) if _PASS_RE.search(out) else 0
+                failed_n = int(_FAIL_RE.search(out).group(1)) if _FAIL_RE.search(out) else 0
+                hard = any(h in low for h in _HARD_FAIL)
+                ok = tr.ok and not hard and failed_n == 0 and (passed_n > 0 or "success" in low)
 
             if ok:
                 return rec("pass", "")
