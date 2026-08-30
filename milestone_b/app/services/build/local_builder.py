@@ -95,13 +95,6 @@ Do NOT keep calling list_dir for files that are not there — if a path does not
 Call exactly one tool per turn. Never answer in prose. At most ONE list_dir call total — you rarely need it."""
 
 
-_GDSCRIPT_HINT = (
-    "This is GDScript (Godot). Key rules a Python-trained model gets wrong:\n"
-    "- indent with TABS, not spaces. Functions are `func name(args):`. No `def`.\n"
-    "- `extends Node` at the top; typed vars `var x: int = 0`; `return a + b`.\n"
-    "- no `self.` needed for members; `print(...)`; arrays `[]`, dicts `{}`.\n"
-    "- run_tests here runs `godot --headless` against the target script, not pytest."
-)
 _KOTLIN_HINT = (
     "This is Kotlin/Java (Android/Gradle). `fun name(a: Int): Int = a + b`, "
     "`val`/`var`, no semicolons needed. Unit tests use JUnit "
@@ -144,14 +137,15 @@ def _preload_paths(root: Path, target_file: str, contract: TaskContract) -> list
 
 
 def _language_hint(root: Path, target_file: str, contract: TaskContract) -> str:
+    import itertools
+
     ext = Path(target_file).suffix.lower() if target_file else ""
     ev = " ".join(contract.required_evidence).lower()
-    try:
-        names = {p.suffix.lower() for p in root.rglob("*") if p.is_file()}
+    try:  # bounded — a huge repo must not stall the build on a file walk
+        names = {p.suffix.lower()
+                 for p in itertools.islice(root.rglob("*"), 3000) if p.is_file()}
     except OSError:
         names = set()
-    if ext == ".gd" or "godot" in ev or ".gd" in names or (root / "project.godot").is_file():
-        return _GDSCRIPT_HINT
     if ext in (".kt", ".java") or "gradle" in ev or {".kt", ".gradle"} & names:
         return _KOTLIN_HINT
     if ext == ".py" or ".py" in names:

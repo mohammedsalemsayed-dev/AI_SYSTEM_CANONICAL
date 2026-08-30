@@ -19,27 +19,6 @@ def _sub(tmp_path: Path, name: str) -> Path:
 
 
 @pytest.fixture
-def godot_repo(tmp_path: Path) -> str:
-    d = _sub(tmp_path, "godot")
-    (d / "project.godot").write_text(
-        'config_version=5\n[application]\nconfig/features=PackedStringArray("4.2")\n', encoding="utf-8")
-    (d / "player.gd").write_text("extends CharacterBody2D\n", encoding="utf-8")
-    (d / "main.tscn").write_text("[gd_scene format=3]\n", encoding="utf-8")
-    return str(d)
-
-
-@pytest.fixture
-def unreal_repo(tmp_path: Path) -> str:
-    d = _sub(tmp_path, "unreal")
-    (d / "Game.uproject").write_text(
-        '{"EngineAssociation": "5.3", "Modules": [{"Name": "Game"}]}', encoding="utf-8")
-    src = d / "Source" / "Game"
-    src.mkdir(parents=True)
-    (src / "Game.Build.cs").write_text("public class Game : ModuleRules {}", encoding="utf-8")
-    return str(d)
-
-
-@pytest.fixture
 def android_repo(tmp_path: Path) -> str:
     d = _sub(tmp_path, "android")
     (d / "settings.gradle").write_text('include(":app")\ninclude(":core")\n', encoding="utf-8")
@@ -60,29 +39,19 @@ def python_repo(tmp_path: Path) -> str:
 
 
 def test_each_adapter_detects_its_own_and_not_the_others(
-    godot_repo, unreal_repo, android_repo, python_repo
+    android_repo, python_repo
 ) -> None:
     reg = EngineRegistry()
-    assert reg.detect(godot_repo)[0].name == "godot"
-    assert reg.detect(unreal_repo)[0].name == "unreal"
     assert reg.detect(android_repo)[0].name == "android"
     assert reg.detect(python_repo)[0].name == "generic"
 
-    from app.services.engines.godot import GodotAdapter
+    from app.services.engines.android import AndroidAdapter
 
-    assert GodotAdapter().detect(python_repo) == 0.0
+    assert AndroidAdapter().detect(python_repo) == 0.0
 
 
-def test_engine_info_fields(godot_repo, unreal_repo, android_repo, python_repo) -> None:
+def test_engine_info_fields(android_repo, python_repo) -> None:
     reg = EngineRegistry()
-    g = reg.detect(godot_repo)[1]
-    assert g.engine == "godot" and g.version_hint == "4.2"
-    assert "*.gd" in g.source_globs and "headless" in g.test_cmd and g.conventions
-
-    u = reg.detect(unreal_repo)[1]
-    assert u.engine == "unreal" and u.version_hint == "5.3"
-    assert "Automation RunTests" in u.test_cmd
-
     a = reg.detect(android_repo)[1]
     assert a.engine == "android" and "API 34" == a.version_hint
     assert "gradlew" in a.test_cmd and "core" in a.conventions["structure"]
@@ -105,12 +74,12 @@ def test_registry_prefers_specific_over_generic(tmp_path: Path) -> None:
     assert ad.name == "generic" and info.engine == "generic"
 
 
-def test_expert_profiles_render_bounded_blocks(godot_repo) -> None:
+def test_expert_profiles_render_bounded_blocks(android_repo) -> None:
     reg = EngineRegistry()
-    ad, info = reg.detect(godot_repo)
+    ad, info = reg.detect(android_repo)
     block = render_profile(ad.expert_profile(), info)
     assert block.startswith("EXPERT MODE") and block.count("\n") <= 12
-    assert "do:" in block and "don't:" in block and "ENGINE: godot" in block
+    assert "do:" in block and "don't:" in block and "ENGINE: android" in block
 
 
 def test_domain_profile_selection() -> None:

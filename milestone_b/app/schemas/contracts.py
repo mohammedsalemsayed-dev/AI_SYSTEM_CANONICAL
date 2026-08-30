@@ -568,9 +568,9 @@ class BreadthAdvice(BaseModel):
 # --------------------------------------------------------------------------- #
 # contract gate (leave INTERPRETING)
 # --------------------------------------------------------------------------- #
-# a runnable T0 target: pytest, or one of the engine verifiers (Godot / GUT /
-# Unreal automation / Android-Gradle) that the desktop runner swaps in per project
-_T0_PYTEST_RE = re.compile(r"(pytest|godot|gut|gradle|unreal|android)\s+\S+", re.IGNORECASE)
+# a runnable T0 target: pytest, or the Android/Gradle verifier the desktop
+# runner swaps in for a Gradle project
+_T0_PYTEST_RE = re.compile(r"(pytest|gradle|android)\s+\S+", re.IGNORECASE)
 
 # classes whose deliverable is a code diff — these need a runnable T0 oracle.
 # Other classes (research_web, doc_analysis, authoring, planning_arch, qa_explain,
@@ -596,7 +596,7 @@ def validate_contract(contract: TaskContract) -> list[str]:
         if not has_t0:
             problems.append(
                 "required_evidence names no runnable T0 target (expected an entry like "
-                "'T0: pytest tests/test_x.py::test_y passes', or 'T0: godot res://... passes' "
-                "/ 'T0: android gradle :app:testDebugUnitTest passes' for an engine project)"
+                "'T0: pytest tests/test_x.py::test_y passes', or "
+                "'T0: android gradle :app:testDebugUnitTest passes' for a Gradle project)"
             )
     return problems

@@ -9,11 +9,9 @@ from __future__ import annotations
 from app.services.engines.android import AndroidAdapter
 from app.services.engines.base import EngineAdapter, EngineInfo
 from app.services.engines.generic import GenericAdapter
-from app.services.engines.godot import GodotAdapter
-from app.services.engines.unreal import UnrealAdapter
 
 # order = tie-break preference (most specific first); generic is always last
-_DEFAULT = [GodotAdapter(), UnrealAdapter(), AndroidAdapter(), GenericAdapter()]
+_DEFAULT = [AndroidAdapter(), GenericAdapter()]
 
 
 class EngineRegistry:

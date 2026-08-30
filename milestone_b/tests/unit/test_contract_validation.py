@@ -69,15 +69,13 @@ def test_evidence_with_a_pytest_t0_target_passes(evidence) -> None:
 @pytest.mark.parametrize(
     "evidence",
     [
-        ["T0: godot res://test/run_tests.gd passes"],
-        ["T0: godot gut test/unit passes"],
         ["T0: android gradle :app:testDebugUnitTest passes"],
-        ["T0: unreal automation MyGame.Jump passes"],
+        ["T0: gradle test passes"],
     ],
 )
-def test_engine_t0_targets_are_accepted(evidence) -> None:
-    # the desktop runner swaps in GodotVerifier / AndroidVerifier / UnrealVerifier
-    # per project — their evidence lines must not be rejected as unverifiable
+def test_gradle_t0_targets_are_accepted(evidence) -> None:
+    # the desktop runner swaps in AndroidVerifier for a Gradle project — its
+    # evidence lines must not be rejected as unverifiable
     assert validate_contract(_contract(required_evidence=evidence)) == []
 
 

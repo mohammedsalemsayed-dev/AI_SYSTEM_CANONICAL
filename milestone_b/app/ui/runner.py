@@ -195,8 +195,6 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
         from app import runtime_cancel
         runtime_cancel.arm()  # clear any stale Stop flag before this run
 
-        is_godot = Path(workspace, "project.godot").is_file()
-        is_unreal = any(Path(workspace).glob("*.uproject"))
         is_android = (Path(workspace, "settings.gradle").is_file()
                       or Path(workspace, "settings.gradle.kts").is_file())
         preamble = _session_context(db_path, session_id, workspace)
@@ -208,31 +206,15 @@ def _do_run(request: str, workspace: str, db_path: str, apply: bool,
             att_note = prompt_note(attachments, descs)
             att_kb = build_kb(attachments)
         engine_note = ""
-        if is_unreal:
-            engine_note = ("[This is an Unreal Engine project — the editor is driven over MCP "
-                           "(see .mcp.json). Verification runs UE Automation Tests via that MCP; "
-                           "keep the UE editor open with the MCP plugin running.]")
-        elif is_godot:
-            engine_note = ("[This is a Godot project — write GDScript (.gd) files, use "
-                           "`extends`/`func`/`var`; verification runs `godot --headless`.]")
-        elif is_android:
+        if is_android:
             engine_note = ("[This is an Android/Gradle project — keep state/logic in a "
                            "ViewModel, strings in res/; verification runs `./gradlew` "
                            "unit tests on a workspace copy.]")
         full_request = "\n".join(x for x in (preamble, engine_note, att_note, request) if x)
 
         local_llm = _CancelLLM(get_llm(_LOCAL))  # Stop button honoured per model call
-        # engine projects don't verify with pytest
         verifier = VerifierT0()
-        if is_unreal:
-            from app.services.verify.verifier_unreal import UnrealVerifier
-
-            verifier = UnrealVerifier()
-        elif is_godot:
-            from app.services.verify.verifier_godot import GodotVerifier
-
-            verifier = GodotVerifier()
-        elif is_android:
+        if is_android:
             from app.services.verify.verifier_android import AndroidVerifier
 
             verifier = AndroidVerifier()

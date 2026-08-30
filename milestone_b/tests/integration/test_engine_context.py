@@ -20,29 +20,31 @@ def _git(d: Path, *a: str) -> None:
 
 
 @pytest.fixture
-def godot_repo(tmp_path: Path) -> str:
-    d = tmp_path / "game"
+def android_repo(tmp_path: Path) -> str:
+    d = tmp_path / "app-proj"
     d.mkdir()
-    (d / "project.godot").write_text(
-        'config_version=5\n[application]\nconfig/features=PackedStringArray("4.2")\n', encoding="utf-8", newline="\n")
-    (d / "player.gd").write_text(
-        "extends Node\n\n\ndef _ready():\n    pass\n", encoding="utf-8", newline="\n")
-    (d / "main.tscn").write_text("[gd_scene format=3]\n", encoding="utf-8", newline="\n")
-    (d / "test_player.py").write_text(
+    (d / "settings.gradle").write_text("include(':app')\n", encoding="utf-8", newline="\n")
+    src = d / "app" / "src" / "main"
+    src.mkdir(parents=True)
+    (src / "AndroidManifest.xml").write_text("<manifest/>", encoding="utf-8", newline="\n")
+    (d / "app" / "build.gradle").write_text(
+        "android { compileSdk 34 }\napply plugin: 'com.android.application'\n",
+        encoding="utf-8", newline="\n")
+    (d / "test_thing.py").write_text(
         "def test_ok():\n    assert True\n", encoding="utf-8", newline="\n")
     _git(d, "init", "-q")
     _git(d, "add", "-A")
-    _git(d, "commit", "-q", "-m", "game")
+    _git(d, "commit", "-q", "-m", "app")
     return str(d)
 
 
-def test_godot_project_gets_expert_mode_and_engine_event(godot_repo: str) -> None:
+def test_engine_project_gets_expert_mode_and_engine_event(android_repo: str) -> None:
     log = EventLog()
     captured: dict[str, str] = {}
 
     def planner_llm(system: str, prompt: str) -> str:
         captured["prompt"] = prompt
-        return planner_reply(intent="add a jump", capability="fs.write")
+        return planner_reply(intent="fix it", capability="fs.write")
 
     from app.llm.fake import ScriptedLLM as SL
     from app.orchestration.orchestrator import Orchestrator
@@ -57,22 +59,21 @@ def test_godot_project_gets_expert_mode_and_engine_event(godot_repo: str) -> Non
     orch = Orchestrator(
         log,
         Interpreter(SL([interpreter_reply(
-            objective="add a jump to player.gd",
-            required_evidence=["T0: pytest test_player.py::test_ok passes"])])),
+            objective="fix the thing",
+            required_evidence=["T0: pytest test_thing.py::test_ok passes"])])),
         Planner(SL(planner_llm)),
-        ScriptedBuilder({"player.gd": "extends Node\n\n\ndef _ready():\n    pass\n\n\ndef jump():\n    pass\n"}),
+        ScriptedBuilder({"note.txt": "touched\n"}),
         VerifierT0(runner=runner), PolicyEngine(), runner=runner,
     )
     orch.engines = EngineRegistry()
 
-    r = orch.run("add a jump ability to the player", godot_repo)
+    r = orch.run("fix the thing", android_repo)
     assert r.state == "COMPLETED"
 
     eng = [e for e in log.read(r.task_id) if e.kind == EventKind.ENGINE]
-    assert eng and eng[0].payload["engine"] == "godot"
-    assert "run-tests" in eng[0].payload["test_cmd"]
-    assert "EXPERT MODE" in captured["prompt"] and "signals over" in captured["prompt"].lower() \
-        or "signals and await" in captured["prompt"].lower()
+    assert eng and eng[0].payload["engine"] == "android"
+    assert "gradlew" in eng[0].payload["test_cmd"]
+    assert "EXPERT MODE" in captured["prompt"] and "viewmodel" in captured["prompt"].lower()
     log.close()
 
 

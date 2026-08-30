@@ -121,7 +121,7 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
             pass
 
         # external MCP servers declared by the project's own .mcp.json
-        # (e.g. an Unreal-editor MCP) — registered only when reachable now.
+        # — registered only when reachable now.
         mcp_json = Path(workspace) / ".mcp.json"
         if mcp_json.is_file():
             from app.services.tools.adapters.mcp_tool import from_mcp_json
@@ -134,12 +134,12 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
     wired.append("tools(" + ",".join(a.name for a in treg.all()) + ")")
 
     # --- engine registry (N) — engine-aware expert context at planning - #
-    # detect(root) resolves Godot / Unreal / Android / generic; the orchestrator
-    # folds the adapter's expert profile + test command into the planner prompt.
+    # detect(root) resolves Android/Gradle or generic; the orchestrator folds
+    # the adapter's expert profile + test command into the planner prompt.
     from app.services.engines.registry import EngineRegistry
 
     orch.engines = EngineRegistry()
-    wired.append("engines(godot,unreal,android,generic)")
+    wired.append("engines(android,generic)")
 
     # --- bounded tool-use loop (T) — the `ops` deliverable path -------- #
     # one policy-checked tool call per turn, on a workspace copy. Uses the same

@@ -1,7 +1,7 @@
 """Generic MCP client tool adapter (Streamable HTTP transport).
 
 Lets the orchestrator's tool loop call an external MCP server's tools as
-`<name>.<tool>` operations — e.g. an Unreal-editor MCP on http://127.0.0.1:8000/mcp
+`<name>.<tool>` operations — e.g. an editor or service MCP on http://127.0.0.1:8000/mcp
 exposed by a project's own `.mcp.json`.
 
 stdlib only (urllib). JSON-RPC 2.0 over POST; the server may answer with
