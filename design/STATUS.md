@@ -11,11 +11,12 @@ None of the stub items were dropped — they're listed so they don't quietly van
 
 ## How it was built
 
-Directed construction with Claude Code over roughly three days (2026-08-28 to -30):
-I wrote the spec and the per-stage plans in `build-log/`, then drove an agent
-through them stage by stage, reviewing diffs and running the test suite as the
-gate. So "built" here means *designed, wired, and test-passing* — not
-*hand-written line by line* and not *battle-tested in production*.
+A close back-and-forth between me and Claude Code over roughly three days
+(2026-08-28 to -30). I designed the architecture and wrote the per-stage plans in
+`build-log/`; Claude drafted each stage; then we iterated — I reviewed every diff,
+debugged what broke, and made the keep-or-cut calls, with the test suite as the
+gate. So "built" here means *designed, wired, and test-passing* — written fast and
+with AI in the loop — not *battle-tested in production*.
 
 ## What's real now
 

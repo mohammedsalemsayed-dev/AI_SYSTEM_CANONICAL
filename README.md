@@ -8,14 +8,19 @@ The rule it's built around: **a model never approves its own work — a test doe
 Every change is built and checked on a throwaway copy of your folder and only
 written back if the test passes.
 
-## How this was built
+## How it was built
 
-I wrote the spec and a per-stage plan, then drove Claude Code through it over about
-three days, reviewing each diff and using the test suite as the gate. So "built"
-here means *designed, wired, and passing its tests* — not hand-written line by line,
-and not yet hardened by real-world use. The [`design/build-log/`](design/build-log/)
-folder is the honest day-by-day record; [`design/STATUS.md`](design/STATUS.md) is
-the plain accounting of what's solid versus still a stub.
+Built over about three days as a tight back-and-forth between me and Claude Code. I
+designed the architecture and wrote a plan for each stage; Claude drafted the first
+implementation of each; then we went round on it — I reviewed every diff, debugged
+what didn't hold up, and made the keep-or-cut calls (the game-engine layer, for
+one, got built and then removed). The test suite was the gate on all of it.
+
+So the code was written fast and with AI in the loop, but the design, the reviews,
+and every decision about what stays are mine. It hasn't been hardened by real-world
+use yet. [`design/build-log/`](design/build-log/) is the day-by-day record;
+[`design/STATUS.md`](design/STATUS.md) is the plain accounting of what's solid
+versus still a stub.
 
 ## What it does
 
