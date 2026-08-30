@@ -6,8 +6,21 @@ not the slice). `git ls-files` when available, else a bounded recursive walk.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+
+# build / cache / vendored trees to prune — a UE or Unity project's
+# Binaries/Intermediate/DerivedDataCache alone can be 100k+ files and turn a
+# plain rglob into a multi-minute stall.
+_SKIP_DIRS = {
+    ".git", ".svn", ".hg", "node_modules", "__pycache__", ".venv", "venv",
+    ".mypy_cache", ".pytest_cache", ".gradle", ".idea", ".vs", "dist", "build",
+    "target", "bin", "obj",
+    # Unreal / Unity
+    "Binaries", "Intermediate", "DerivedDataCache", "Saved", "Build",
+    "Library", "Temp", "Logs", "Obj",
+}
 
 
 def is_git_repo(path: str) -> bool:
@@ -21,18 +34,21 @@ def list_workspace(path: str, max_files: int = 400) -> str:
         try:
             out = subprocess.run(
                 ["git", "-C", str(root), "ls-files"],
-                capture_output=True,
-                text=True,
-                timeout=15,
+                capture_output=True, text=True, timeout=15,
             )
             files = [line for line in out.stdout.splitlines() if line.strip()]
         except (OSError, subprocess.SubprocessError):
             files = []
     if not files:
-        files = [
-            str(f.relative_to(root)).replace("\\", "/")
-            for f in root.rglob("*")
-            if f.is_file() and ".git" not in f.parts
-        ]
+        # bounded, dir-pruned walk — stop as soon as we have enough
+        cap = max_files * 4  # gather a few extra so the sort is representative
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            rel = os.path.relpath(dirpath, root)
+            for fn in filenames:
+                p = fn if rel == "." else f"{rel}/{fn}"
+                files.append(p.replace("\\", "/"))
+            if len(files) >= cap:
+                break
     files.sort()
     return "\n".join(files[:max_files])
