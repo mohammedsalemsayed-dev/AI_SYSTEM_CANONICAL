@@ -1,5 +1,25 @@
 # Milestone N — Engine Adapters & Expert Modes Plan
 
+> ## ⚠️ REMOVED (2026-08-30) — historical record only
+>
+> The entire engine-adapter / expert-mode layer was **removed** from the codebase.
+> `app/services/engines/`, `EngineToolAdapter`, `orchestrator._engine_context`, the
+> `ENGINE` event, and all engine/expert-mode tests are gone. Godot and Unreal support
+> was dropped first (commit `73fabbb`); the remaining Android/generic detection + the
+> whole layer was dropped after that.
+>
+> **Why:** it added planning-context guidance the local models mostly ignored, needed
+> per-engine toolchains to be useful, and did not move the app toward "one prompt /
+> one doc → a working thing". Not worth the complexity.
+>
+> **What stayed:** `AndroidVerifier` (`app/services/verify/verifier_android.py`) — a
+> real T0 gate that runs `gradlew` JVM unit tests for a Gradle project. That is
+> verification, not an "engine adapter", and the app's stated purpose is verify-first
+> code fixing, which includes Android/JVM projects.
+>
+> Everything below is the original plan, kept for traceability. It no longer
+> describes the code. See the root [README.md](README.md) for current scope.
+
 > **Cross-reference**
 > - Role: Build plan for the fifth §10.2 capability domain — per-engine project adapters (Godot / Unreal / Android + a generic fallback) and expert prompt profiles that make the Interpreter / Planner / Builder engine-aware.
 > - Authority: Implementation plan; subordinate to the Complete Claude-Code Spec and [DESIGN_TIGHTENING.md](DESIGN_TIGHTENING.md).

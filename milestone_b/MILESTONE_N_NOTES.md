@@ -1,5 +1,18 @@
 # Milestone N notes — what is real, what remains
 
+> ## ⚠️ REMOVED (2026-08-30) — historical record only
+>
+> The engine-adapter / expert-mode layer described below was **removed** from the
+> codebase. `app/services/engines/`, `EngineToolAdapter`, `orchestrator._engine_context`,
+> the `ENGINE` event, and the engine/expert-mode tests are gone. Godot/Unreal went
+> first (commit `73fabbb`), then the rest.
+>
+> `AndroidVerifier` (`app/services/verify/verifier_android.py`) stayed — it is a real
+> `gradlew` JVM-unit-test T0 gate, not an engine adapter.
+>
+> The text below is kept for traceability only. See the root
+> [README.md](../README.md) for current scope.
+
 Status against [../MILESTONE_N_PLAN.md](../MILESTONE_N_PLAN.md). **376 tests green.**
 All 12 days built. Fifth §10.2 capability domain.
 

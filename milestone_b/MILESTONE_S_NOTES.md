@@ -14,7 +14,7 @@ All 10 days built. Removes "tool adapter ecosystem" from the
 | Git adapter | `app/services/tools/adapters/git_tool.py::GitToolAdapter` | Wraps `GitAdapter`. `git.status` / `git.log` / `git.blame` / `git.diff` / `git.changed_files` need `vcs.read`; `git.branch` needs `vcs.branch`, `git.commit` needs `vcs.commit` (both `side_effecting`). No fetch/pull/push/remote op exists — local VCS only. Backend errors (`GitError`/`KeyError`/`ValueError`/`TypeError`) → `ToolResult(ok=False)`. |
 | FS adapter | `app/services/tools/adapters/fs_tool.py::FsToolAdapter` | `fs.read` / `fs.list` need `fs.read`; `fs.write` needs `fs.write` (`side_effecting`). `_resolve()` does `(root / rel).resolve()` then `relative_to(root)` — a path escaping the workspace → `ToolResult(ok=False)`, never a traversal. Reads truncate at `READ_CAP_BYTES = 256 KiB` (`meta.truncated`). `fs.list` skips `.git`. |
 | Egress adapter | `app/services/tools/adapters/egress_tool.py::EgressToolAdapter` | `net.fetch` needs `net.fetch`, `output_trust="retrieved_web"`, `side_effecting`. Wraps `EgressBroker.fetch`; `EgressDenied`/`EgressError` → `ToolResult(ok=False, trust="retrieved_web")`. Text capped at 8 000 chars. The policy layer's `egress-not-allowed` rule blocks an off-allowlist host **before** the broker; the broker's own allowlist is the second line. |
-| Engine adapter | `app/services/tools/adapters/engine_tool.py::EngineToolAdapter` | `engine.detect` / `engine.info` — read-only project inspection (`vcs.read`), wraps `EngineRegistry.detect`. |
+| ~~Engine adapter~~ | ~~`engine_tool.py::EngineToolAdapter`~~ | **REMOVED 2026-08-30** with the rest of the engine-adapter layer. |
 | Orchestrator wiring | `orchestrator.tools` / `_tool()` | `self.tools = None` opt-in (`ToolRegistry`). At `INTERPRETING`, when set, `registry.manifest_block()` is prepended to the listing the Interpreter + Planner see. `_tool(op, args, ctx)` lazily builds one `ToolDispatcher(self.tools, self.policy)`, dispatches, logs a `POLICY_DECISION` event on a non-ALLOW decision, then always logs a `TOOL` event `{op, ok, trust, error[:200], meta}`, and returns the `ToolResult`. **This milestone does not reroute `_execute` / the Builder through the dispatcher** — it ships the framework, the manifest context, and the helper. |
 | Events | `+ TOOL` (`op`, `ok`, `trust`, `error`, `meta`). |
 
@@ -37,7 +37,8 @@ All 10 days built. Removes "tool adapter ecosystem" from the
 - **Builder routed through the dispatcher** — `_execute` still calls the Builder directly.
   Routing every file edit through `fs.write` (and every repo read through `git.*`) so the
   policy engine sees each one is the natural follow-up; the seam is now in place.
-- **A real tool ecosystem** — only git / fs / egress / engine adapters ship. HTTP-API tools,
+- **A real tool ecosystem** — only git / fs / egress adapters ship (plus a shell tool and a
+  generic MCP client; the `engine` adapter was removed 2026-08-30). HTTP-API tools,
   a shell/exec tool, language-server / linter / formatter tools, cloud SDK tools, etc. are
   each an additive `ToolAdapter` — no framework change.
 - **LLM-driven tool selection** — the manifest is injected into the planning context, but no

@@ -136,7 +136,6 @@ class Orchestrator:
         self.research = None  # Milestone K — set to a ResearchPipeline for research_web tasks
         self.kb = None  # Milestone L — set to a KnowledgeBase for doc_analysis tasks
         self.authoring = None  # Milestone M — set to an AuthoringPipeline for authoring tasks
-        self.engines = None  # Milestone N — set to an EngineRegistry for engine-aware context
         self.selection = None  # Milestone O — set to a ModelSelectionController for fitted routing
         self.artifacts = None  # Milestone P — set to an ArtifactStore for versioned artifacts
         self.tools = None  # Milestone S — set to a ToolRegistry to enumerate + dispatch tools
@@ -286,10 +285,6 @@ class Orchestrator:
             repo_ctx = self._repo_context(task_id, workspace_path, request_text)
             if repo_ctx:
                 listing = repo_ctx + "\n\n" + listing
-
-            engine_ctx = self._engine_context(task_id, workspace_path, request_text)
-            if engine_ctx:
-                listing = engine_ctx + "\n\n" + listing
 
             if self.tools is not None:
                 listing = self.tools.manifest_block() + "\n" + listing
@@ -1138,41 +1133,6 @@ class Orchestrator:
              "error": result.error[:200], "meta": result.meta},
         )
         return result
-
-    # ------------------------------------------------------------------ #
-    # Milestone N — engine adapters + expert modes
-    # ------------------------------------------------------------------ #
-    def _engine_context(self, task_id, workspace_path, request_text) -> str:
-        if self.engines is None:
-            return ""
-        from app.services.engines.base import render_profile
-        from app.services.engines.profiles import domain_profile
-
-        try:
-            adapter, info = self.engines.detect(workspace_path)
-        except Exception as exc:  # noqa: BLE001 — engine context is best-effort
-            self.log.append(task_id, EventKind.ENGINE, {"error": repr(exc)})
-            return ""
-
-        # a "expert: <name>" hint in the request text also forces a domain profile
-        forced = None
-        low = request_text.lower()
-        if "expert:" in low:
-            forced = domain_profile(low.split("expert:", 1)[1].strip().split()[0].strip(" .,:;"))
-
-        ENGINE_MIN_CONF = 0.6
-        if info.confidence < ENGINE_MIN_CONF and forced is None:
-            return ""
-
-        profile = forced or adapter.expert_profile()
-        block = render_profile(profile, info)
-        self.log.append(
-            task_id, EventKind.ENGINE,
-            {"engine": info.engine, "confidence": round(info.confidence, 2),
-             "version_hint": info.version_hint, "build_cmd": info.build_cmd,
-             "test_cmd": info.test_cmd, "profile": profile.name},
-        )
-        return block
 
     # ------------------------------------------------------------------ #
     # Milestone J — repo intelligence

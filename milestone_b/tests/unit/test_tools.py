@@ -14,7 +14,6 @@ from app.services.egress.broker import EgressBroker
 from app.services.policy.engine import PolicyEngine
 from app.services.repo.git_adapter import GitAdapter
 from app.services.tools.adapters.egress_tool import EgressToolAdapter
-from app.services.tools.adapters.engine_tool import EngineToolAdapter
 from app.services.tools.adapters.fs_tool import FsToolAdapter
 from app.services.tools.adapters.git_tool import GitToolAdapter
 from app.services.tools.base import DispatchContext
@@ -44,7 +43,6 @@ def reg(repo: str) -> ToolRegistry:
     return (ToolRegistry()
             .register(GitToolAdapter(GitAdapter(repo)))
             .register(FsToolAdapter())
-            .register(EngineToolAdapter())
             .register(EgressToolAdapter(EgressBroker(allowlist=["ok.example"],
                                                     opener=lambda u, t: b"hello"))))
 
@@ -55,7 +53,7 @@ def test_registry_find_and_manifest_block(reg: ToolRegistry) -> None:
     found = reg.find("git.status")
     assert found and found[1].capability == "vcs.read"
     block = reg.manifest_block()
-    for op in ("git.status", "fs.read", "fs.write", "engine.info", "net.fetch"):
+    for op in ("git.status", "fs.read", "fs.write", "net.fetch"):
         assert op in block
     assert "[vcs.read]" in block and "(side-effecting)" in block
     assert reg.find("git.nope") is None

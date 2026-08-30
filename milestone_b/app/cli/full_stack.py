@@ -41,7 +41,6 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
     from app.services.routing.router import Router
     from app.services.routing.stats import RouteStatsStore
     from app.services.tools.adapters.egress_tool import EgressToolAdapter
-    from app.services.tools.adapters.engine_tool import EngineToolAdapter
     from app.services.tools.adapters.fs_tool import FsToolAdapter
     from app.services.tools.adapters.git_tool import GitToolAdapter
     from app.services.tools.adapters.shell_tool import ShellToolAdapter
@@ -110,7 +109,6 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
     treg = (ToolRegistry()
             .register(FsToolAdapter())
             .register(ShellToolAdapter())
-            .register(EngineToolAdapter())
             .register(EgressToolAdapter(EgressBroker(allowlist=[]))))
     if workspace:
         from app.services.repo.git_adapter import GitAdapter
@@ -132,14 +130,6 @@ def wire_full_stack(orch, *, local_model: str = "qwen3:8b", db_path: str = "slic
                     wired.append(f"{ad.name}({len(ad.manifest().ops)} ops)")
     orch.tools = treg
     wired.append("tools(" + ",".join(a.name for a in treg.all()) + ")")
-
-    # --- engine registry (N) — engine-aware expert context at planning - #
-    # detect(root) resolves Android/Gradle or generic; the orchestrator folds
-    # the adapter's expert profile + test command into the planner prompt.
-    from app.services.engines.registry import EngineRegistry
-
-    orch.engines = EngineRegistry()
-    wired.append("engines(android,generic)")
 
     # --- bounded tool-use loop (T) — the `ops` deliverable path -------- #
     # one policy-checked tool call per turn, on a workspace copy. Uses the same

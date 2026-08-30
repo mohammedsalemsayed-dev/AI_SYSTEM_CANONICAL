@@ -9,6 +9,14 @@
 
 This ZIP is the canonical context package for implementing the Autonomous Hardware-Aware Multi-Agent AI System.
 
+> **Current-state note (2026-08-30).** These authoritative documents describe the *target*
+> system. What was actually built is narrower, and some strands (game-engine adapters,
+> expert modes) were built and then **removed** by explicit decision. For an honest
+> statement of what the app does and does not do today, read the root
+> [README.md](../README.md) and
+> [../02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md](../02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md)
+> first — they are authoritative over these design docs on questions of *what exists now*.
+
 ## Read this package in order
 1. `README_FOR_CLAUDE_CODE.md` (this file)
 2. `../01_AUTHORITATIVE_SOURCE_DOCUMENTS/Autonomous_Multi_Agent_AI_System_Complete_Claude_Code_Spec.docx`

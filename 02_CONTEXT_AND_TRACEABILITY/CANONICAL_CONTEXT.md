@@ -8,19 +8,27 @@
 > - Wiring & concrete detail: [DESIGN_TIGHTENING.md](../DESIGN_TIGHTENING.md) — §1 object flow, §4 control loops, §9 agent composition.
 
 ## Product identity
+
+> **Scope note (2026-08-30).** The list below is the *original* ambition. What was
+> actually built is narrower, and the game-engine / expert-mode strands were built and
+> then **removed** as not worth the complexity. The honest, current statement of what
+> the app does and does not do is the root [README.md](../README.md) — treat it as
+> authoritative over this list.
+
 This project is a hybrid local/cloud AI workstation and collaborative technical partner, not merely a chatbot or terminal wrapper.
 
-It must eventually support:
+Original ambition (not all realised):
 - serious software engineering;
 - whole-repository understanding;
 - controlled AI coding;
-- Windows, Android, Godot and Unreal work;
+- ~~Windows, Android, Godot and Unreal work~~ — game-engine support was removed;
+  Android/Gradle survives only as a `gradlew` JVM-unit-test verification target;
 - autonomous internet research and source-based reasoning;
 - document analysis and knowledge/RAG workflows;
 - professional DOCX/PDF generation;
 - presentation generation;
 - local AI experimentation;
-- specialized expert modes;
+- ~~specialized expert modes~~ — removed with the engine-adapter layer;
 - controlled execution, review, verification and recovery.
 
 ## Core architectural philosophy

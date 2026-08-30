@@ -16,22 +16,20 @@ def _orch():
     return build_orchestrator(EventLog(), [], [])
 
 
-def test_wire_full_stack_connects_engines_tool_loop_selection_kb(tmp_path: Path) -> None:
+def test_wire_full_stack_connects_tool_loop_selection_kb(tmp_path: Path) -> None:
     orch = _orch()
     db = str(tmp_path / "ev.db")
     wired = wire_full_stack(orch, db_path=db, workspace=str(tmp_path), verbose=False)
 
-    from app.services.engines.registry import EngineRegistry
     from app.services.kb.store import KnowledgeBase
     from app.services.routing.selection import ModelSelectionController
     from app.services.tools.loop import ToolLoop
 
-    assert isinstance(orch.engines, EngineRegistry)
     assert isinstance(orch.tool_loop, ToolLoop)
     assert isinstance(orch.selection, ModelSelectionController)
     assert isinstance(orch.kb, KnowledgeBase)
 
-    for tag in ("engines", "tool_loop", "selection", "kb"):
+    for tag in ("tool_loop", "selection", "kb"):
         assert any(w.startswith(tag) for w in wired), f"{tag} not reported wired"
 
 

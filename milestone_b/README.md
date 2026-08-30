@@ -8,7 +8,7 @@ from `03_IMPLEMENTATION_FOUNDATION/prior_foundation/` (reference scaffold, not e
 ```bash
 cd milestone_b
 python -m pip install -e ".[dev]"    # pydantic + pytest
-python -m pytest                      # 47 tests
+python -m pytest tests/              # full suite (run from milestone_b/)
 python -m app.cli.demo               # offline end-to-end run, no API key
 ```
 
@@ -187,10 +187,12 @@ per-milestone notes and [../02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md
 | K | Research pipeline & evidence graph ([notes](MILESTONE_K_NOTES.md)) | `orch.research` | `research_web` → decompose → evidence graph → cross-check → cited `ResearchAnswer` |
 | L | RAG / knowledge base ([notes](MILESTONE_L_NOTES.md)) | `orch.kb` | `doc_analysis` → BM25 retrieval → claims-only `KBAnswer` (`doc_input` trust); `research` can blend KB + web |
 | M | Authoring pipelines ([notes](MILESTONE_M_NOTES.md)) | `orch.authoring` | `authoring` → outline → KB-grounded draft → review → Markdown/HTML render |
-| N | Engine adapters & expert modes ([notes](MILESTONE_N_NOTES.md)) | `orch.engines` | detect Android/Gradle at `INTERPRETING` → inject an `EXPERT MODE` block + record the engine's test command |
+| N | ~~Engine adapters & expert modes~~ — **REMOVED 2026-08-30** ([notes](MILESTONE_N_NOTES.md)) | — | Godot/Unreal then the whole `app/services/engines/` layer removed as not worth the complexity. `AndroidVerifier` (`gradlew` JVM-unit-test T0 gate) stayed. |
 | O | Automated model selection ([notes](MILESTONE_O_NOTES.md)) | `orch.selection` | fit a logistic `WeightSet`; flip a `task_class` static↔data-driven, gated by the guardrail regression check |
 
-384 tests green. All six §10.2 capability domains are FOUNDATION.
+Full suite green (`python -m pytest tests/` from `milestone_b/`). K, L, M, O are
+FOUNDATION; N was removed (see the row above). Scope: see the root
+[README.md](../README.md) "What it actually does — and doesn't".
 
 ## Day 10 handoff
 

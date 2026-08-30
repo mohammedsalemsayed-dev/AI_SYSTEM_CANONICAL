@@ -117,12 +117,15 @@ billed Messages API instead.
 
 ```bash
 winget install Ollama.Ollama            # or https://ollama.com
-ollama pull qwen3:8b                    # general: interpret / plan / critic / builder
-ollama pull qwen2.5-coder:7b            # optional comparison model
+ollama pull qwen3:8b                          # general: interpret / plan / critic / builder
+ollama pull qwen2.5-coder:7b-instruct-q5_K_M  # optional: used as the builder model if present
+ollama pull llava                            # optional: only for deck auto-visuals (NEXUS_DECK_IMAGES=1)
 ```
 
-`qwen3:8b` (~5 GB Q4) fits an 8 GB GPU with room for context. See the benchmark below for
-why it's the pick.
+`qwen3:8b` (~5 GB Q4) fits an 8 GB GPU with room for context and drives every role by
+default. If a `qwen2.5-coder` model is pulled, `app/ui/runner.py` uses it as the *builder*
+model only (interpret/plan/critic stay on `qwen3:8b`); nothing else changes and it falls
+back to `qwen3:8b` when absent. See the benchmark below.
 
 ### 5. Postgres (optional — durable, multi-session store)
 
@@ -202,7 +205,9 @@ verified, not the model's self-report.
 | qwen2.5-coder:7b | 6 / 10 | 0.97 | 11.9 | 16.3 s | 21 k |
 | llama3.1:8b | 2 / 10 | 0.99 | 17.2 | 55.9 s | 27 k |
 
-The coding-specialist lost; `qwen3:8b` is the local model for every role. `llama3.1:8b`
+On this bench the coding-specialist lost, so `qwen3:8b` is the default for every role.
+A `qwen2.5-coder` model, if pulled, is still used as the *builder* model (opt-in, see
+setup) — larger coder tags (`:14b`) do better than the `:7b` measured here. `llama3.1:8b`
 emits valid tool syntax but can't drive the task (hits the turn cap 60 % of the time).
 
 ### End-to-end, full stack — real library bugs (`LOCAL_FIRST_BENCH_REAL.md`)
@@ -224,9 +229,9 @@ safe to a human instead of shipping a bad fix.
 
 ### Test suite
 
-**488 tests** green (`milestone_b/tests/{unit,security,integration,regression,fault}`),
+**523 tests** green (`milestone_b/tests/{unit,security,integration,regression,fault}`),
 offline-deterministic, base dependency `pydantic` only. The 6 Postgres tests skip unless
-`NEXUS_PG_TEST_DSN` is set.
+`NEXUS_PG_TEST_DSN` is set. Run from `milestone_b/`: `python -m pytest tests/`.
 
 ---
 
@@ -265,7 +270,7 @@ Redis/queue; a secrets vault; macOS/Linux bundles; T2-verifier false-positive tu
 | **K** Research pipeline & evidence graph | decomposition, evidence graph, bounded cross-check, claims-only cited synthesis, injection scan | **built** |
 | **L** RAG / knowledge base | ingest + heading-aware chunking + BM25 behind a `Retriever` protocol; `doc_analysis` flow | **built** |
 | **M** Authoring pipelines | `DocumentModel` + `SlideDeck`; outline → grounded draft → review → render | **built** |
-| **N** Engine adapters & expert modes | Android/Gradle + generic detection + `EngineInfo` + expert prompt profiles (Godot/Unreal removed — see scope note above) | **built** |
+| **N** ~~Engine adapters & expert modes~~ | **REMOVED** — built, then removed in full (not worth the complexity). `AndroidVerifier` (a `gradlew` JVM-unit-test T0 gate) is all that remains, and it lives in the verifier layer, not an adapter. | removed |
 | **O** Automated model selection | logistic-regression `WeightSet` fit + `ModelSelectionController`, regression-gated, canary-demoted | **built** |
 | **P** Artifact & version tracking | content-addressed `ArtifactStore` + per-objective version chain + mark-never-delete | **built** |
 | **Q** Fault injection & recovery hardening | fault wrappers + hard-kill hook; 20-case suite proving safe-terminal / clean-reconcile | **built** |

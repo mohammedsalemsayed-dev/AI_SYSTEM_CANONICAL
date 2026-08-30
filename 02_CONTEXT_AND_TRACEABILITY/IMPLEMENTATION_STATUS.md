@@ -30,13 +30,13 @@ Built since the original scaffold (now FOUNDATION — see the per-milestone sect
 - empirical benchmark harness and registry (G, I, O — offline; real numbers need the subscription);
 - capability issuance/expiry and policy engine (C);
 - approvals and authentication/authorization — single-user approval protocol (C);
-- hardened OS/container sandbox execution (C — Docker tier-B; tier-C engine-toolchain seam pending);
+- hardened OS/container sandbox execution (C — Docker tier-B; tier-C heavy-toolchain seam pending);
 - checkpoints and crash recovery integration (D, Q);
 - structured multi-agent runtime (E);
 - research/retrieval/source evaluation (K);
 - repository intelligence and Git adapter (J);
 - RAG/indexing (L);
-- document/presentation pipelines (M — Markdown/HTML; DOCX/PPTX/PDF are `Renderer` stubs);
+- document/presentation pipelines (M — Markdown/HTML stdlib; DOCX/PPTX via python-docx / python-pptx; PDF via a bundled dependency-free writer);
 - event streaming (H — SSE; raw WebSocket not required by the read-model design);
 - tool adapter ecosystem (S — the §5-C dispatch spine; T — a `shell` adapter + a bounded
   model-driven tool-use loop for `ops` tasks; U — D's loop detector wired into that loop;
@@ -414,8 +414,12 @@ Now real (slice scope):
   `Block` (7 kinds) / `Citation`; `all_citations()` in first-reference order; `SlideDeck`
   (one slide per H2).
 - **Renderers** — `authoring/render.py`: `Renderer` protocol; `MarkdownRenderer` +
-  `HtmlRenderer` ship (references section, escaping, tables/code/lists); `Docx/Pptx/Pdf`
-  renderers are stubs raising `RendererUnavailable` — the §16 integration seam.
+  `HtmlRenderer` (stdlib). `DocxRenderer` / `PptxRenderer` render themed output via
+  python-docx / python-pptx (`RendererUnavailable` if the package is missing);
+  `PdfRenderer` uses a bundled dependency-free writer (`authoring/pdf_writer.py`,
+  Helvetica, no install). `get_renderer(name, theme, images)` picks per-brief; the
+  orchestrator writes every rendered format to disk when the run targets a real
+  workspace.
 - **outline → draft → review** — `authoring/{outline,draft,review}.py`: retrieval-grounded
   heading tree (KB-unsupported sections flagged); per-section claims-only body from KB claims
   + brief + memory context, `doc_input`-trust citations attached; a review pass (structural
@@ -430,35 +434,30 @@ Now real (slice scope):
   rendered doc is a `workspace` artifact, not evidence.
 - **Event kind** — `AUTHORING`.
 
-Deferred: real DOCX/PPTX/PDF renderers behind `Renderer`; a revise loop; templates/themes;
-generated figures.
+Update (2026-08-30): DOCX/PPTX/PDF renderers are now real (python-docx / python-pptx /
+bundled PDF writer), themed, and written to disk for real-workspace runs; deck auto-visuals
+are opt-in (`NEXUS_DECK_IMAGES`). Still deferred: a revise loop; user-supplied templates.
 
-## Milestone N — engine adapters & expert modes (`milestone_b/`, days 1–12)
+## Milestone N — engine adapters & expert modes — **REMOVED (2026-08-30)**
 
-376 tests green. All 12 days built. Fifth §10.2 capability domain. See
-`milestone_b/MILESTONE_N_NOTES.md`.
+Built during days 1–12, then **removed in full**. `app/services/engines/` (Godot /
+Unreal / Android / Generic adapters + expert/domain profiles + `EngineRegistry`),
+`EngineToolAdapter`, `orchestrator._engine_context`, the `ENGINE` event, and the
+engine/expert-mode tests are all gone. Godot and Unreal were dropped first (commit
+`73fabbb`); the remaining layer was dropped after.
 
-Now real (slice scope):
-- **Engine adapters** — `app/services/engines/`: `Godot` / `Unreal` / `Android` / `Generic`.
-  Each: read-only `detect(root) -> 0..1` + an `EngineInfo` (source/asset globs, build & test
-  commands, version hint, conventions). `EngineRegistry.detect()` returns the
-  highest-confidence adapter, generic last, never nothing.
-- **Expert profiles** — per-engine `ExpertProfile` (prompt + do/don't) from the adapters +
-  domain profiles (`systems`, `data-pipeline`, `web-frontend`, `security-review`) selectable
-  by a `"expert: <name>"` constraint/request hint. `render_profile()` → a bounded
-  `EXPERT MODE` block.
-- **Orchestrator** — `orch.engines` opt-in; at `INTERPRETING`, a project detected at
-  confidence ≥ 0.6 (or a forced `"expert:"`) prepends the `EXPERT MODE` block to the
-  Interpreter/Planner context and logs an `ENGINE` event carrying the engine's own
-  `test_cmd`. The command is **data for the Planner, never executed**; a pytest T0 still
-  gates. Engines unset / low-confidence generic → context byte-identical to Milestone M.
-- **Scope** — advisory + additive only: no state-machine, policy, capability, or T-ladder
-  change. Detection does no write and runs no engine binary.
-- **Event kind** — `ENGINE`.
+**Why:** the layer only added planning-context guidance the local models mostly
+ignored, needed per-engine toolchains it never shipped to be useful, and did not move
+the app toward its actual goal ("one prompt / one doc → a working thing"). Not worth
+the complexity.
 
-Deferred: engine-toolchain execution (§5-C tier-C sandbox seam — `godot --headless` / UBT /
-`gradlew`); engine-native verification as a T-ladder tier; per-engine repo-intelligence
-parsers; more engines (Unity, Bevy, Xcode, Flutter).
+**What stayed:** `AndroidVerifier` (`app/services/verify/verifier_t0`-tier,
+`app/services/verify/verifier_android.py`) — a real T0 gate that runs `gradlew` JVM
+unit tests for a Gradle project. It is verification, not an engine adapter, and it is
+selected by a plain `settings.gradle[.kts]` check in `app/ui/runner.py`.
+
+The fifth §10.2 capability domain ("Godot / Unreal / Android adapters + expert modes")
+is therefore **not implemented**. See the root `README.md` scope section.
 
 ## Milestone O — automated model selection (`milestone_b/`, days 1–10)
 
@@ -571,8 +570,8 @@ power/battery reads; auto-recalibration scheduling.
 
 445 tests green. All 10 days built. Removes **"tool adapter ecosystem"** from the "still
 requiring real implementation" list above. Not a new §10.2 domain — the §5-C spine that
-unifies the six existing tool-adapter packages (git / research / KB / authoring / engines /
-routing). See `milestone_b/MILESTONE_S_NOTES.md`.
+unifies the existing tool-adapter packages (git / research / KB / authoring / routing; the
+`engine` adapter shipped here was removed 2026-08-30). See `milestone_b/MILESTONE_S_NOTES.md`.
 
 Now real (slice scope):
 - **Contract** — `app/services/tools/base.py`: `ToolOp` / `ToolManifest` / `ToolResult` /
@@ -587,8 +586,9 @@ Now real (slice scope):
   manifest `output_trust` — `retrieved_web` is never laundered to `workspace`.
 - **Adapters** — `git` (read ops `vcs.read`; `git.branch`/`git.commit` gated, local only),
   `fs` (workspace-scoped by `relative_to` containment; `fs.write` gated), `net` (wraps the
-  default-deny `EgressBroker`, `output_trust="retrieved_web"`), `engine` (read-only
-  `EngineRegistry.detect`).
+  default-deny `EgressBroker`, `output_trust="retrieved_web"`), `shell` (`shell.exec` via the
+  `SandboxRunner` seam), plus a generic MCP client for project `.mcp.json` servers. (The
+  `engine` adapter shipped here was removed 2026-08-30.)
 - **Orchestrator** — `self.tools` opt-in `ToolRegistry`; when set, `manifest_block()` is
   prepended to the planning context and `_tool(op, args, ctx)` dispatches + logs a `TOOL`
   event (and a `POLICY_DECISION` on denial). Unset → planning context + events byte-identical

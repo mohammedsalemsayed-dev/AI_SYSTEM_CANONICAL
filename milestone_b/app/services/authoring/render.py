@@ -1,8 +1,10 @@
 """Renderers (MILESTONE_M_PLAN.md §2, §16).
 
 Markdown + HTML are stdlib. DOCX + PPTX render via python-docx / python-pptx
-(integrations, not builds — §16). PDF is still a stub (needs reportlab/weasyprint).
-Binary renderers put bytes in `RenderedDoc.data`; text renderers use `.text`.
+(integrations, not builds — §16; `RendererUnavailable` if the package is missing).
+PDF renders via the bundled dependency-free writer (`authoring/pdf_writer.py`,
+Helvetica, no install). Binary renderers put bytes in `RenderedDoc.data`; text
+renderers use `.text`.
 """
 
 from __future__ import annotations

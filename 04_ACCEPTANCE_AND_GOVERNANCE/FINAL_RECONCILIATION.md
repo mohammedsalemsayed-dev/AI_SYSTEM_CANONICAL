@@ -16,7 +16,9 @@ The prior final ZIP compressed a large body of authoritative requirements into a
 - broad development tool domains;
 - research/RAG;
 - document and presentation generation;
-- expert modes;
+- ~~expert modes~~ — later dropped by explicit decision (2026-08-30): the engine-adapter /
+  expert-mode layer was built and removed as not worth the complexity. See the root
+  [README.md](../README.md) and [IMPLEMENTATION_STATUS.md](../02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md);
 - complete provider/benchmark implementation.
 
 The authoritative source documents are therefore preserved verbatim in this package. The traceability files explicitly distinguish active requirements from implemented code.

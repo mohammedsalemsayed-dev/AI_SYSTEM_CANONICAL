@@ -74,7 +74,7 @@ class EventKind:
     SYNTHESIS = "SYNTHESIS"
     KB = "KB"
     AUTHORING = "AUTHORING"
-    ENGINE = "ENGINE"
+    ENGINE = "ENGINE"  # retired 2026-08-30 (engine-adapter layer removed); kept for replay of old logs
     SELECTION = "SELECTION"
     TELEMETRY = "TELEMETRY"
     TOOL = "TOOL"

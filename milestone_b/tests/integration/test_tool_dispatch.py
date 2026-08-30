@@ -10,10 +10,8 @@ from app.events.log import EventKind, EventLog
 from app.schemas.contracts import CapabilityGrant
 from app.services.capability.registry import spec_for
 from app.services.egress.broker import EgressBroker
-from app.services.engines.registry import EngineRegistry
 from app.services.repo.git_adapter import GitAdapter
 from app.services.tools.adapters.egress_tool import EgressToolAdapter
-from app.services.tools.adapters.engine_tool import EngineToolAdapter
 from app.services.tools.adapters.fs_tool import FsToolAdapter
 from app.services.tools.adapters.git_tool import GitToolAdapter
 from app.services.tools.base import DispatchContext
@@ -25,7 +23,6 @@ def _registry(repo: str) -> ToolRegistry:
     return (ToolRegistry()
             .register(GitToolAdapter(GitAdapter(repo)))
             .register(FsToolAdapter())
-            .register(EngineToolAdapter(EngineRegistry()))
             .register(EgressToolAdapter(EgressBroker(allowlist=[], opener=lambda u, t: b""))))
 
 
@@ -56,7 +53,7 @@ def test_tool_manifest_at_planning(sample_repo: str) -> None:
     assert r.state == "COMPLETED"
     block = captured["listing"]
     assert "TOOLS — available operations" in block
-    for op in ("git.status", "git.commit", "fs.read", "fs.write", "engine.info", "net.fetch"):
+    for op in ("git.status", "git.commit", "fs.read", "fs.write", "net.fetch"):
         assert op in block
     assert "[vcs.read]" in block and "(side-effecting)" in block
     log.close()
