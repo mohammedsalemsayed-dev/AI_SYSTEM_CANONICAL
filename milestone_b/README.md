@@ -187,7 +187,7 @@ per-milestone notes and [../02_CONTEXT_AND_TRACEABILITY/IMPLEMENTATION_STATUS.md
 | K | Research pipeline & evidence graph ([notes](MILESTONE_K_NOTES.md)) | `orch.research` | `research_web` → decompose → evidence graph → cross-check → cited `ResearchAnswer` |
 | L | RAG / knowledge base ([notes](MILESTONE_L_NOTES.md)) | `orch.kb` | `doc_analysis` → BM25 retrieval → claims-only `KBAnswer` (`doc_input` trust); `research` can blend KB + web |
 | M | Authoring pipelines ([notes](MILESTONE_M_NOTES.md)) | `orch.authoring` | `authoring` → outline → KB-grounded draft → review → Markdown/HTML render |
-| N | Engine adapters & expert modes ([notes](MILESTONE_N_NOTES.md)) | `orch.engines` | detect Godot/Unreal/Android at `INTERPRETING` → inject an `EXPERT MODE` block + record the engine's test command |
+| N | Engine adapters & expert modes ([notes](MILESTONE_N_NOTES.md)) | `orch.engines` | detect Android/Gradle at `INTERPRETING` → inject an `EXPERT MODE` block + record the engine's test command |
 | O | Automated model selection ([notes](MILESTONE_O_NOTES.md)) | `orch.selection` | fit a logistic `WeightSet`; flip a `task_class` static↔data-driven, gated by the guardrail regression check |
 
 384 tests green. All six §10.2 capability domains are FOUNDATION.

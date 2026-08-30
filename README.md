@@ -1,10 +1,62 @@
-# Autonomous Hardware-Aware Multi-Agent AI System
+# NEXUS — a local, verify-first code fixer + document generator
 
-A modular-monolith desktop AI workstation: specialised LLM agents propose and reason,
-**deterministic services enforce** — state, permissions, execution boundaries, verification,
-recovery, memory trust, controlled learning, hardware protection, and model routing.
+A desktop app that runs an autonomous agent **on your own machine** using local LLMs
+(via Ollama), escalating to Claude (Sonnet/Opus via your Claude subscription — not paid
+API) only when the local model can't produce something that **passes a real test**.
 
-The core idea: **run the work on a local model when it can, escalate to a cloud model when
+Design principle: **LLMs propose, deterministic components decide.** A model never
+approves its own work — a test does. Every change is built and verified on a throwaway
+copy of your folder and only written back if the test passes.
+
+## What it actually does — and doesn't
+
+**This is a narrow tool.** It does one thing well: local, credit-free, *verified* code
+fixes on testable projects, unattended — plus document generation. It is **not** a
+"build me an app / game / thing" tool.
+
+### It CAN
+
+- **Fix a failing test** in an existing **Python** project → make it pass, applied only if verified
+- **Multi-file bug fixes** in a real Python repo — traces dependencies, makes a minimal change
+- **Write a small new Python module + its test** from a prompt
+- **Follow-up edits** threaded in the same folder ("now also add …")
+- Fix **Kotlin/Java logic** bugs in an existing Gradle project **that has JVM unit tests**
+- **Answer questions** about a codebase without changing anything
+- **Generate documents** — Word (`.docx`), PowerPoint (`.pptx`), PDF, Markdown — themed,
+  multi-section, writes the file to your folder; optionally **grounded on an attached file**
+- **Describe attached images**; ingest attached docs into a knowledge base
+- Call tools from a project's **`.mcp.json`** (generic MCP client)
+- Run **without git**, in any folder; **escalate to Claude** automatically; **Stop** a run mid-flight
+- **Cost line** shows "100% local" vs "☁ N cloud calls · ~X tok" per run
+
+### It CAN'T
+
+- **Scaffold a new project** from nothing (app, service, library, CLI) — it edits files, not skeletons
+- **Build / run an Android APK** — no Android SDK; Android verification is JVM unit tests only
+- **Android UI / Compose / layouts**, **iOS**, or **web frontend with visual verification**
+- **Godot / Unreal / any game engine** — no scene, level, asset, or gameplay work
+- **Level / environment / game design**, **3D / graphics / shaders**, **visual / UI design**
+- **Verify anything without a test** — no pytest/Gradle test = it won't apply the change
+- **Instrumented / UI / e2e / browser tests**; **large architectural rewrites**
+- **Deploy, push to a remote, open a PR** — blocked by design (local commits/branches only)
+- Hard algorithm problems on the **local model alone** (it escalates; cloud then can)
+- **Fast** responses — ~40 s per reasoning step on a typical 8 GB GPU
+- **Concurrent runs** (one at a time); meaningfully edit **binary files**
+- Anything **creative, visual, or spatial** from a prompt
+
+**Who it's for:** you have an existing Python (or Kotlin-with-unit-tests) codebase and a
+stream of small, test-backed fixes you want done for free without babysitting a chat. For
+building things, or anything visual/creative, use Claude or an IDE assistant directly.
+
+---
+
+## Architecture (the enforced part)
+
+Specialised LLM agents propose and reason; **deterministic services enforce** — state,
+permissions, execution boundaries, verification, recovery, memory trust, controlled
+learning, hardware protection, and model routing.
+
+The loop: **run the work on a local model when it can, escalate to a cloud model when
 it can't — automatically, and never ship an unverified change.**
 
 ![demo](docs/demo.gif)
@@ -213,7 +265,7 @@ Redis/queue; a secrets vault; macOS/Linux bundles; T2-verifier false-positive tu
 | **K** Research pipeline & evidence graph | decomposition, evidence graph, bounded cross-check, claims-only cited synthesis, injection scan | **built** |
 | **L** RAG / knowledge base | ingest + heading-aware chunking + BM25 behind a `Retriever` protocol; `doc_analysis` flow | **built** |
 | **M** Authoring pipelines | `DocumentModel` + `SlideDeck`; outline → grounded draft → review → render | **built** |
-| **N** Engine adapters & expert modes | Godot / Unreal / Android / generic detection + `EngineInfo` + expert prompt profiles | **built** |
+| **N** Engine adapters & expert modes | Android/Gradle + generic detection + `EngineInfo` + expert prompt profiles (Godot/Unreal removed — see scope note above) | **built** |
 | **O** Automated model selection | logistic-regression `WeightSet` fit + `ModelSelectionController`, regression-gated, canary-demoted | **built** |
 | **P** Artifact & version tracking | content-addressed `ArtifactStore` + per-objective version chain + mark-never-delete | **built** |
 | **Q** Fault injection & recovery hardening | fault wrappers + hard-kill hook; 20-case suite proving safe-terminal / clean-reconcile | **built** |
