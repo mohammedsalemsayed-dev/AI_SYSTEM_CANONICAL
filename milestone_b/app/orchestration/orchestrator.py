@@ -396,7 +396,8 @@ class Orchestrator:
         try:
             try:
                 combined_diff = self._execute(
-                    task_id, contract, plan, workspace_path, approved_steps
+                    task_id, contract, plan, workspace_path, approved_steps,
+                    fast_escalate=(builder_round == 0 and self.fallback_builder is not None),
                 )
             finally:
                 if _route_primary is not None:
@@ -434,6 +435,30 @@ class Orchestrator:
                 state=State.WAITING_FOR_USER,
             )
         except StalledEscalation as stall:
+            # a local builder that stalled -> don't grind / ask the user, just
+            # hand it to the stronger (cloud) builder while we still have the
+            # round-0 escalation available. The cloud model is the point of the
+            # fallback; a 7B thrashing is exactly when to use it.
+            if builder_round == 0 and self.fallback_builder is not None:
+                primary = self.builder
+                self.log.append(
+                    task_id, EventKind.ESCALATION,
+                    {"reason": f"local builder stalled ({stall.detail})",
+                     "from_builder": getattr(primary, "name", "?"),
+                     "to_builder": getattr(self.fallback_builder, "name", "?")},
+                )
+                self._transition(task_id, State.STALLED)
+                self._transition(task_id, State.RECOVERING)
+                self._transition(task_id, State.EXECUTING)
+                self.builder = self.fallback_builder
+                try:
+                    return self._execute_verify_settle(
+                        task_id, contract, plan, workspace_path,
+                        approved_steps=approved_steps, critic_round=critic_round,
+                        builder_round=1,
+                    )
+                finally:
+                    self.builder = primary
             self.log.append(
                 task_id,
                 EventKind.CLARIFICATION,
@@ -681,14 +706,20 @@ class Orchestrator:
         plan: Plan,
         workspace_path: str,
         approved_steps: set[str],
+        *,
+        fast_escalate: bool = False,
     ) -> str:
         ws = copy_workspace(workspace_path)
         target = extract_pytest_target(contract.required_evidence)
         progress = ProgressService(task_id, patience_for(contract.task_class))
         loop = LoopDetector()
+        # a local builder with a cloud fallback still waiting: don't grind the
+        # re-plan rungs — reach the stall fast so the caller can hand off to the
+        # stronger model (see the StalledEscalation handler)
         ladder = Ladder(
-            has_critic=self.critic is not None,
-            has_researcher=self.researcher is not None,
+            max_replans=0 if fast_escalate else 2,
+            has_critic=self.critic is not None and not fast_escalate,
+            has_researcher=self.researcher is not None and not fast_escalate,
             has_stronger_model=self.router is not None,
         )
         budget = BudgetTracker(contract.budget, contract.task_class)

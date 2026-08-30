@@ -113,6 +113,36 @@ _PY_HINT = (
 )
 
 
+def _preload_paths(root: Path, target_file: str, contract: TaskContract) -> list[str]:
+    """Repo files worth putting in the builder's first prompt: the verification
+    target, any module the objective names, and (for a Python target) the local
+    modules that target imports. At most 3, newest logic first."""
+    out: list[str] = []
+
+    def add(rel: str) -> None:
+        rel = rel.replace("\\", "/").lstrip("./")
+        if rel and rel not in out and (root / rel).is_file():
+            out.append(rel)
+
+    if target_file and (root / target_file).is_file():
+        add(target_file)
+    # a *.py / *.gd / ... named in the objective
+    for m in re.findall(r"\b([\w./-]+\.(?:py|gd|kt|java|js|ts))\b", contract.objective or ""):
+        add(m)
+    # local modules imported by a python target test
+    if target_file.endswith(".py") and (root / target_file).is_file():
+        try:
+            src = (root / target_file).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            src = ""
+        for mod in re.findall(r"^\s*(?:from|import)\s+([\w.]+)", src, re.M):
+            top = mod.split(".")[0]
+            for cand in (f"{top}.py", f"{top}/__init__.py", f"src/{top}.py",
+                         f"{mod.replace('.', '/')}.py"):
+                add(cand)
+    return out[:3]
+
+
 def _language_hint(root: Path, target_file: str, contract: TaskContract) -> str:
     ext = Path(target_file).suffix.lower() if target_file else ""
     ev = " ".join(contract.required_evidence).lower()
@@ -232,10 +262,21 @@ class LocalBuilder:
         vtarget = target or next(
             (e for e in contract.required_evidence if "t0" in e.lower()), "(none specified)"
         )
+        # pre-load the verification target's source so the model doesn't burn
+        # 2-4 turns re-discovering what it has to satisfy
+        preloaded = ""
+        for rel in _preload_paths(root, target_file, contract):
+            try:
+                txt = (root / rel).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if txt.strip():
+                preloaded += f"\n\n--- {rel} (already in the repo) ---\n{txt[:6000]}"
         user = (
             f"OBJECTIVE\n{contract.objective}\n\nTHIS STEP\n{step.intent}\n\n"
             f"VERIFICATION TARGET\n{vtarget}\n\n{mode}"
             + (f"\n\nLANGUAGE NOTES\n{lang_hint}" if lang_hint else "")
+            + (f"\n\nFILES YOU ALREADY HAVE (do not re-read these):{preloaded}" if preloaded else "")
         )
         messages = [
             {"role": "system", "content": _SYSTEM},
@@ -273,8 +314,17 @@ class LocalBuilder:
             _cancel_check()  # user pressed Stop -> abort the build loop
             self.metrics.turns += 1
             reply = self._chat(messages)
-            messages.append(reply)
             calls = self._extract_calls(reply)
+            if not calls:
+                # the model replied with prose — re-ask this turn with the reply
+                # grammar-constrained to a single tool call before giving up on it
+                reply = self._chat(
+                    messages + [{"role": "user", "content":
+                                 'Reply with ONLY {"tool": "...", "args": {...}} — one tool call.'}],
+                    force_json=True,
+                )
+                calls = self._extract_calls(reply)
+            messages.append(reply)
             if not calls:
                 self.metrics.invalid_tool_calls += 1
                 unproductive += 1
@@ -329,15 +379,33 @@ class LocalBuilder:
         self.metrics.hit_turn_cap = True
 
     # -- Ollama chat -------------------------------------------- #
-    def _chat(self, messages: list[dict]) -> dict:
+    # grammar/schema that forces a single valid tool call in `content` — used to
+    # recover a turn where the model replied with prose and no tool call
+    _TOOLCALL_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "tool": {"type": "string",
+                     "enum": ["list_dir", "read_file", "write_file", "edit_file",
+                              "run_tests", "finish"]},
+            "args": {"type": "object"},
+        },
+        "required": ["tool", "args"],
+    }
+
+    def _chat(self, messages: list[dict], *, force_json: bool = False) -> dict:
         body = {
-            "model": self.model, "messages": messages, "tools": _TOOLS,
+            "model": self.model, "messages": messages,
             "stream": False, "keep_alive": self.keep_alive,
             # agentic tool-use wants fast direct turns, not a CoT preamble each
             # step; Qwen3 honours this, other models ignore it.
             "think": False,
             "options": {"temperature": 0.0},
         }
+        if force_json:
+            # constrain the whole reply to {"tool": "...", "args": {...}}
+            body["format"] = self._TOOLCALL_SCHEMA
+        else:
+            body["tools"] = _TOOLS
         req = urllib.request.Request(
             f"{self.host}/api/chat", data=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json"}, method="POST",

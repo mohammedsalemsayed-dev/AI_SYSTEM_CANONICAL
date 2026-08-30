@@ -25,7 +25,8 @@ from typing import Any, Callable
 _LOCAL = "local:qwen3:8b"                 # interpret / plan / reason
 # a code-specialised local model does the actual editing when it's pulled;
 # `ollama pull qwen2.5-coder:7b` (or :14b) to enable — falls back to _LOCAL.
-_CODER_CANDIDATES = ("qwen2.5-coder:14b", "qwen2.5-coder:7b", "qwen2.5-coder",
+_CODER_CANDIDATES = ("qwen2.5-coder:14b", "qwen2.5-coder:7b-instruct-q5_K_M",
+                     "qwen2.5-coder:7b-instruct-q5_0", "qwen2.5-coder:7b", "qwen2.5-coder",
                      "deepseek-coder-v2:16b", "codellama:13b")
 _coder_cache: dict[str, str] = {}
 
