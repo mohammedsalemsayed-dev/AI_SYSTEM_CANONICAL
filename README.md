@@ -296,5 +296,17 @@ Redis/queue; a secrets vault; macOS/Linux bundles; T2-verifier false-positive tu
 
 ---
 
-© 2026 **Mohammed Salem Sayed**. All rights reserved. Proprietary — see [`LICENSE`](LICENSE).
-No use, copying, modification, or distribution without prior written permission.
+## License
+
+© 2026 **Mohammed Salem Sayed**. Licensed under the
+[**PolyForm Noncommercial License 1.0.0**](LICENSE) (see also [`NOTICE`](NOTICE)).
+
+- **You may** use, modify, and redistribute this project — including your own
+  modified or derivative versions — for any **noncommercial** purpose.
+- **You must** keep the `LICENSE` and `NOTICE` files with every copy and **give
+  credit** to the original author.
+- **Commercial or business use of any kind requires a separate written license.**
+  Contact **mohammed.salem.sayed@gmail.com**.
+
+This is a source-available license, not an OSI-approved open-source license.
+Third-party dependencies named in the manifests keep their own licenses.
