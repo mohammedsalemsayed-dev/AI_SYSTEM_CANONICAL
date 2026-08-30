@@ -31,6 +31,39 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _warm_models_async() -> None:
+    """Fire a 1-token generate at the local models so the first real request
+    isn't a 40s cold model-load. Best-effort, daemon thread, silent on failure.
+    Skip with NEXUS_NO_WARMUP=1."""
+    if os.environ.get("NEXUS_NO_WARMUP") == "1":
+        return
+    import threading
+
+    def _warm() -> None:
+        import json as _json
+        import urllib.request as _u
+
+        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        try:
+            from app.ui.runner import _LOCAL, _local_coder
+
+            models = {_LOCAL.split(":", 1)[1], _local_coder().split(":", 1)[1]}
+        except Exception:  # noqa: BLE001
+            models = {"qwen3:8b"}
+        for m in models:
+            try:
+                body = _json.dumps({"model": m, "prompt": "ok", "stream": False,
+                                    "keep_alive": "30m", "options": {"num_predict": 1}}).encode()
+                req = _u.Request(f"{host}/api/generate", data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
+                _u.urlopen(req, timeout=180).read()
+                print(f"warmed {m}", flush=True)
+            except Exception:  # noqa: BLE001
+                pass
+
+    threading.Thread(target=_warm, daemon=True, name="nexus-warmup").start()
+
+
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
 
@@ -55,6 +88,7 @@ def main(argv: list[str]) -> int:
         from app.ui.runner import build_task_runner
 
         runner = build_task_runner(db)
+        _warm_models_async()
 
     srv = serve(db, host=args.host, port=args.port, runner=runner)
     print(

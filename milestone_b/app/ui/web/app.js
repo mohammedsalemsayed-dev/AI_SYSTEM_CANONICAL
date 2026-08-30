@@ -269,6 +269,7 @@ function renderStatus(tl) {
     `<span><b>${ktok(c.in_tokens || 0)}</b>↑ <b>${ktok(c.out_tokens || 0)}</b>↓ tok</span>` +
     `<span>verify <b>${c.verify_pass || 0}</b>/<b>${(c.verify_pass || 0) + (c.verify_fail || 0)}</b></span>` +
     (c.escalations ? `<span class="warn"><b>${c.escalations}</b> escalation${c.escalations > 1 ? "s" : ""}</span>` : "") +
+    (c.recovery_steps ? `<span title="internal recovery-ladder steps — not extra model spend"><b>${c.recovery_steps}</b> recovery step${c.recovery_steps > 1 ? "s" : ""}</span>` : "") +
     costLine;
 }
 

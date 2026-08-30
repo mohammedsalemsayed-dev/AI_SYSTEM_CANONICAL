@@ -126,7 +126,12 @@ class AndroidVerifier:
                 and failed_n == 0
             )
             crit.verdict = "pass" if passed else "fail"
-            tail = out.strip()[-1500:]
+            # lead the failure text with the useful lines (failing tasks, test
+            # counts, compiler errors) rather than the Gradle daemon banner
+            keep = [ln for ln in out.splitlines()
+                    if re.search(r"FAILED|tests? completed|error:|Exception|assert|> Task .*test",
+                                 ln, re.I)]
+            tail = ("\n".join(keep[-12:]) or out.strip()[-1200:])[:1500]
             return VerificationRecord(
                 task_id=task_id, tier="T0", criteria=[crit],
                 overall="pass" if passed else "fail",

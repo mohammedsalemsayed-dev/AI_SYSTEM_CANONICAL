@@ -411,7 +411,11 @@ def _row_data(kind: str, payload: dict[str, Any]) -> dict[str, Any] | None:
 def _plan(events: list, state: str) -> list[dict[str, Any]]:
     kinds = {e.kind for e in events}
     verifs = [e.payload.get("overall") for e in events if e.kind == EventKind.VERIFICATION]
-    escalated = EventKind.ESCALATION in kinds
+    escalated = any(
+        e.kind == EventKind.ESCALATION
+        and (e.payload.get("to_builder") or e.payload.get("from_builder"))
+        for e in events
+    )
     steps: list[dict[str, Any]] = []
 
     def add(key: str, label: str, done: bool, now: bool, meta: str = "") -> None:
@@ -463,7 +467,7 @@ def _runs(events: list) -> list[dict[str, Any]]:
 
 
 def _counters(events: list) -> dict[str, Any]:
-    v_pass = v_fail = escs = runs = t_in = t_out = 0
+    v_pass = v_fail = escs = recov = runs = t_in = t_out = 0
     for e in events:
         if e.kind == EventKind.VERIFICATION:
             if e.payload.get("overall") == "pass":
@@ -471,13 +475,19 @@ def _counters(events: list) -> dict[str, Any]:
             else:
                 v_fail += 1
         elif e.kind == EventKind.ESCALATION:
-            escs += 1
+            # a real model escalation is a builder handoff (from/to); the
+            # inspect/change_strategy/critic/... ladder rungs are recovery steps,
+            # not "we spent a stronger model" — don't inflate the escalation count
+            if e.payload.get("to_builder") or e.payload.get("from_builder"):
+                escs += 1
+            else:
+                recov += 1
         elif e.kind == EventKind.MODEL_RUN:
             runs += 1
             t_in += int(e.payload.get("input_tokens", 0) or 0)
             t_out += int(e.payload.get("output_tokens", 0) or 0)
     return {"events": len(events), "model_runs": runs, "escalations": escs,
-            "verify_pass": v_pass, "verify_fail": v_fail,
+            "recovery_steps": recov, "verify_pass": v_pass, "verify_fail": v_fail,
             "in_tokens": t_in, "out_tokens": t_out}
 
 
