@@ -10,7 +10,7 @@ written back if the test passes.
 
 ## How it was built
 
-Built over about three days as a tight back-and-forth between me and Claude Code. I
+Built as a tight back-and-forth between me and Claude Code. I
 designed the architecture and wrote a plan for each stage; Claude drafted the first
 implementation of each; then we went round on it — I reviewed every diff, debugged
 what didn't hold up, and made the keep-or-cut calls (the game-engine layer, for
