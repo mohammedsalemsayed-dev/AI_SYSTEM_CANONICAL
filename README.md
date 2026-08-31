@@ -16,7 +16,7 @@ implementation of each; then we went round on it — I reviewed every diff, debu
 what didn't hold up, and made the keep-or-cut calls (the game-engine layer, for
 one, got built and then removed). The test suite was the gate on all of it.
 
-So the code was written fast and with AI in the loop, but the design, the reviews,
+the design, the reviews,
 and every decision about what stays are mine. It hasn't been hardened by real-world
 use yet. [`design/build-log/`](design/build-log/) is the day-by-day record;
 [`design/STATUS.md`](design/STATUS.md) is the plain accounting of what's solid
